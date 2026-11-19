@@ -1,0 +1,21 @@
+POST /api/v1/namespaces/shop/pods/web-h3-abcde/eviction
+verb: evict
+content-type: application/json
+access review: {"verb":"create","version":"v1","resource":"pods","subresource":"eviction","namespace":"shop","name":"web-h3-abcde"}
+classes: []
+kubectl: 
+body:
+{
+  "apiVersion": "policy/v1",
+  "deleteOptions": {
+    "preconditions": {
+      "resourceVersion": "5150",
+      "uid": "uid-pod"
+    }
+  },
+  "kind": "Eviction",
+  "metadata": {
+    "name": "web-h3-abcde",
+    "namespace": "shop"
+  }
+}

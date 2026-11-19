@@ -1,0 +1,25 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: shy
+  namespace: signals
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: shy
+  template:
+    metadata:
+      labels:
+        app: shy
+    spec:
+      terminationGracePeriodSeconds: 1
+      containers:
+      - name: worker
+        image: busybox:1.37
+        imagePullPolicy: IfNotPresent
+        command: ["sleep", "3600"]
+        readinessProbe:
+          exec:
+            command: ["false"]
+          periodSeconds: 2

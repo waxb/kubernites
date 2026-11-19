@@ -1,0 +1,11 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: web
+  namespace: parity
+spec:
+  selector:
+    app: web-a
+  ports:
+  - port: 80
+    targetPort: 8080

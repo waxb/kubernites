@@ -1,0 +1,155 @@
+entries:
+  - {k8s: Cluster, name: Kingdom, flavor: "One sovereign realm with one Chancery.", docs: "https://kubernetes.io/docs/concepts/overview/components/"}
+  - {k8s: Node, name: Keep, flavor: "A walled holding with fields of food and land for housing, both limited. It counts once its Reeve lights the candle.", docs: "https://kubernetes.io/docs/concepts/architecture/nodes/"}
+  - {k8s: Machine, name: Plot of Land, flavor: "The hardware beneath a Keep. It exists before the Keep is raised and may outlast it.", docs: "https://kubernetes.io/docs/concepts/architecture/nodes/"}
+  - {k8s: Control plane, name: The Citadel, flavor: "Where the Chancery, the Codex, the Quartermaster and the Stewards dwell.", docs: "https://kubernetes.io/docs/concepts/overview/components/#control-plane-components"}
+  - {k8s: kube-apiserver, name: The Chancery, flavor: "Every decree passes through it.", docs: "https://kubernetes.io/docs/concepts/architecture/#kube-apiserver"}
+  - {k8s: etcd, name: The Codex, flavor: "The one book of truth.", docs: "https://kubernetes.io/docs/concepts/architecture/#etcd"}
+  - {k8s: kube-scheduler, name: The Quartermaster, flavor: "Assigns each hut its quarters. Reads only Pledges.", docs: "https://kubernetes.io/docs/concepts/scheduling-eviction/kube-scheduler/"}
+  - {k8s: kube-controller-manager, name: "The Stewards' Hall", flavor: "Literal-minded stewards reconcile what is written.", docs: "https://kubernetes.io/docs/concepts/architecture/controller/"}
+  - {k8s: Controller, name: Steward, flavor: "Watches the world and nudges it toward the decree.", docs: "https://kubernetes.io/docs/concepts/architecture/controller/"}
+  - {k8s: kubelet, name: The Reeve, flavor: "The overseer on every Keep who kindles and relights huts.", docs: "https://kubernetes.io/docs/reference/command-line-tools-reference/kubelet/"}
+  - {k8s: kube-proxy, name: The Wayfinder, flavor: "Keeps the roads to every depot open.", docs: "https://kubernetes.io/docs/reference/command-line-tools-reference/kube-proxy/"}
+  - {k8s: CoreDNS, name: The Herald, flavor: "Announces every depot by name.", docs: "https://kubernetes.io/docs/concepts/services-networking/dns-pod-service/"}
+  - {k8s: Namespace, name: Fief, flavor: "A domain of the realm with its own charter.", docs: "https://kubernetes.io/docs/concepts/overview/working-with-objects/namespaces/"}
+  - {k8s: ServiceAccount, name: Writ, flavor: "A hut's writ: the authority it acts under. In every fief the Stewards write a default writ, and the Chancery turns away a new hut whose writ is not written.", docs: "https://kubernetes.io/docs/concepts/security/service-accounts/"}
+  - {k8s: Pod, name: Hut, flavor: "A household of workers sharing one fire (IP), with its own cellar (volumes).", docs: "https://kubernetes.io/docs/concepts/workloads/pods/"}
+  - {k8s: Static Pod, name: Hut at the door, flavor: "Run by a Keep's Reeve straight from its own shelf (staticPodPath), with no Chancery at all, and relit by the Reeve if it stops. kubeadm raises the Citadel itself this way.", docs: "https://kubernetes.io/docs/tasks/configure-pod-container/static-pod/"}
+  - {k8s: Mirror Pod, name: Mirror hut, flavor: "The Chancery's reflection of a hut at the door, named after its Keep (lantern-lone-tower). Its badges answer to depots, but no decree moves it: delete the mirror and the Reeve simply writes it again.", docs: "https://kubernetes.io/docs/concepts/workloads/pods/static-pods/#mirror-pods"}
+  - {k8s: hostPort, name: "The Keep's Door", flavor: "A hut that answers on the Keep's own port. One door, one hut: the Reeve refuses a second hut asking for the same port (NodePorts). A depot spreads boxes over many.", docs: "https://kubernetes.io/docs/concepts/workloads/controllers/daemonset/#communicating-with-daemon-pods"}
+  - {k8s: Ephemeral storage, name: Cellar, flavor: "Each hut has its own cellar, counted in barrels (one barrel is one MiB): its workers' scratch (emptyDir volumes), the files they write as they work (writable layers) and their Chronicles (container logs). Every cellar is dug into its Keep's ground (the node's disk), where graduates' belongings (images) lie in the Keep's common store. When the ground runs short, the Reeve marks it full (DiskPressure), the Cellar Ward bars new huts, and the Reeve banishes the hut whose cellar most overruns its workers' Cellar Pledges. A cellar is filled in when its hut is razed; a Vault outlives it.", docs: "https://kubernetes.io/docs/concepts/storage/ephemeral-storage/"}
+  - {k8s: etcd compaction, name: Palimpsest, flavor: "Scraping old revisions off the Codex's vellum so the space can be written again. The Chancery does it every five minutes; the book does not shrink.", docs: "https://etcd.io/docs/v3.6/op-guide/maintenance/#history-compaction-v3-api-key-value-database"}
+  - {k8s: etcd defragmentation, name: Rebinding the Codex, flavor: "Rebinding the book so freed pages leave it: the only way the Codex shrinks. Past its quota the Codex raises the NOSPACE alarm and accepts only reads and deletes.", docs: "https://etcd.io/docs/v3.6/op-guide/maintenance/#defragmentation"}
+  - {k8s: PriorityClass, name: Rank, flavor: "How much a hut matters. The Quartermaster seats higher Ranks first, and the Reeve banishes lower Ranks first.", docs: "https://kubernetes.io/docs/concepts/scheduling-eviction/pod-priority-preemption/#priorityclass"}
+  - {k8s: Preemption, name: Displacement, flavor: "When quarters run out, the Quartermaster displaces lower-Ranked huts so a higher Rank can be seated.", docs: "https://kubernetes.io/docs/concepts/scheduling-eviction/pod-priority-preemption/#preemption"}
+  - {k8s: Container, name: Worker, flavor: "The little workers who keep the realm alive.", docs: "https://kubernetes.io/docs/concepts/containers/"}
+  - {k8s: Image, name: Trade, flavor: "A trade taught at the Academy. Every worker summoned from it practises that trade.", docs: "https://kubernetes.io/docs/concepts/containers/images/"}
+  - {k8s: Image tag, name: Class, flavor: "lantern:1.1 means the lamplighters of class 1.1. A class name can be reused; it can lie.", docs: "https://kubernetes.io/docs/concepts/containers/images/#image-names"}
+  - {k8s: Image digest, name: Diploma seal, flavor: "Proves exactly which graduate you got. It cannot lie.", docs: "https://kubernetes.io/docs/concepts/containers/images/#image-names"}
+  - {k8s: Registry, name: The Academy, flavor: "Across the sea. Graduates sail from it to your Keeps; the voyage is the image pull.", docs: "https://kubernetes.io/docs/concepts/containers/images/"}
+  - {k8s: imagePullSecret, name: Academy seal, flavor: "Proof you may recruit from a private Academy.", docs: "https://kubernetes.io/docs/concepts/containers/images/#specifying-imagepullsecrets-on-a-pod"}
+  - {k8s: ImagePullBackOff, name: The Graduate Never Arrived, flavor: "No such course, no such class, or no seal. The Reeve waits longer before sending for them again.", docs: "https://kubernetes.io/docs/concepts/containers/images/#imagepullbackoff"}
+  - {k8s: ErrImagePull, name: The Graduate Never Arrived, flavor: "The Academy did not send anyone.", docs: "https://kubernetes.io/docs/concepts/containers/images/#imagepullbackoff"}
+  - {k8s: ReplicaSet, name: Shift, flavor: "Keeps a count of identical huts of one class burning, raising another when one falls.", docs: "https://kubernetes.io/docs/concepts/workloads/controllers/replicaset/"}
+  - {k8s: Deployment, name: Crew, flavor: "Declare a crew and it runs one shift per class; change its design and a new shift takes over, hut by hut.", docs: "https://kubernetes.io/docs/concepts/workloads/controllers/deployment/"}
+  - {k8s: Service, name: Depot, flavor: "Pilgrims come by name and are sent to any hut Fit for Duty.", docs: "https://kubernetes.io/docs/concepts/services-networking/service/"}
+  - {k8s: EndpointSlice, name: Guild Roll, flavor: "The list of huts answering for a depot.", docs: "https://kubernetes.io/docs/concepts/services-networking/endpoint-slices/"}
+  - {k8s: "LoadBalancer or NodePort Service, Gateway", name: Harbor gate, flavor: "An entrance from the sea: where pilgrims come in from outside the realm. One gate stands for each depot that opens a port on every Keep (NodePort) or asks for a load balancer, and for each Gateway.", docs: "https://kubernetes.io/docs/concepts/services-networking/service/#publishing-services-service-types"}
+  - {k8s: Ingress, name: Signpost, flavor: "Stands at the harbor gate that serves it and points pilgrims by host and path to its depots (HTTP and HTTPS routes). Its address matches its gate's load balancer; a signpost with none yet waits at a plain gate named after its class.", docs: "https://kubernetes.io/docs/concepts/services-networking/ingress/"}
+  - {k8s: Custom resource, name: Foreign hall, flavor: "A kind the realm was not born with, added by a CustomResourceDefinition: one hall for each kind in each fief, and the realm-wide kinds by the market square.", docs: "https://kubernetes.io/docs/concepts/extend-kubernetes/api-extension/custom-resources/"}
+  - {k8s: Managed control plane, name: The Citadel across the sea, flavor: "A cloud keeps the Citadel beyond the sea: no Keep of yours holds it, and only its Chancery answers, at the API server's address.", docs: "https://kubernetes.io/docs/concepts/architecture/"}
+  - {k8s: Namespace view, name: Heraldry view, flavor: "Beside the Land view: each fief's ground tinted in its colours and its crest on pennants, on every Keep it reaches. A fief is logical and spans Keeps; the Land view shows only what stands where.", docs: "https://kubernetes.io/docs/concepts/overview/working-with-objects/namespaces/"}
+  - {k8s: Namespace mark, name: Crest, flavor: "A fief's colours, and its shape once colours repeat. The citadel's crest is stone grey.", docs: "https://kubernetes.io/docs/concepts/overview/working-with-objects/namespaces/"}
+  - {k8s: Namespaces on a Node, name: Pennant, flavor: "A small flag on a Keep in the Heraldry view: one for each fief with huts on that Keep, in its crest.", docs: "https://kubernetes.io/docs/concepts/overview/working-with-objects/namespaces/"}
+  - {k8s: Labels, name: Badges, flavor: "Heraldic badges on every object.", docs: "https://kubernetes.io/docs/concepts/overview/working-with-objects/labels/"}
+  - {k8s: Label selector, name: The badge it looks for, flavor: "All who wear this badge, answer!", docs: "https://kubernetes.io/docs/concepts/overview/working-with-objects/labels/#label-selectors"}
+  - {k8s: Annotations, name: Marginalia, flavor: "Notes in the margin, never used for selection.", docs: "https://kubernetes.io/docs/concepts/overview/working-with-objects/annotations/"}
+  - {k8s: ConfigMap, name: Scroll, flavor: "Configuration written down. Cannot exceed 1 MiB.", docs: "https://kubernetes.io/docs/concepts/configuration/configmap/"}
+  - {k8s: Event, name: Tidings, flavor: "What the realm's servants saw fit to report.", docs: "https://kubernetes.io/docs/reference/kubernetes-api/cluster-resources/event-v1/"}
+  - {k8s: cpu, name: Food, flavor: "Counted in rations: 1,000 rations are one core, and 100m is 100 rations. Compressible: when short, every worker goes hungry and works slower, and nobody dies.", docs: "https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/#meaning-of-cpu"}
+  - {k8s: memory, name: Housing, flavor: "Counted in rooms: one room is one MiB. Incompressible: exceed the Binding and the Void takes you.", docs: "https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/#meaning-of-memory"}
+  - {k8s: requests, name: Pledge, flavor: "What the Quartermaster reserves.", docs: "https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/#requests-and-limits"}
+  - {k8s: limits, name: Binding, flavor: "The ceiling of a worker's appetite.", docs: "https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/#requests-and-limits"}
+  - {k8s: BestEffort, name: Vagrants, flavor: "Pledged nothing; the first to starve.", docs: "https://kubernetes.io/docs/concepts/workloads/pods/pod-qos/"}
+  - {k8s: Burstable, name: Freemen, flavor: "Pledged something, may take more.", docs: "https://kubernetes.io/docs/concepts/workloads/pods/pod-qos/"}
+  - {k8s: Guaranteed, name: Landed, flavor: "Pledge equals Binding; banished last.", docs: "https://kubernetes.io/docs/concepts/workloads/pods/pod-qos/"}
+  - {k8s: Taint, name: Ward, flavor: "Repels huts without the matching Charm.", docs: "https://kubernetes.io/docs/concepts/scheduling-eviction/taint-and-toleration/"}
+  - {k8s: Toleration, name: Charm, flavor: "Lets a hut pass a Ward.", docs: "https://kubernetes.io/docs/concepts/scheduling-eviction/taint-and-toleration/"}
+  - {k8s: kubectl, name: The Speaking Stone, flavor: "Speak the Declarative Tongue and the realm answers.", docs: "https://kubernetes.io/docs/reference/kubectl/"}
+  - {k8s: Manifest, name: Scriptorium, flavor: "Where decrees are written rune by rune.", docs: "https://kubernetes.io/docs/concepts/overview/working-with-objects/"}
+  - {k8s: Pending, name: Unhoused, flavor: "The Quartermaster found no quarters.", docs: "https://kubernetes.io/docs/concepts/workloads/pods/pod-lifecycle/#pod-phase"}
+  - {k8s: ContainerCreating, name: Kindling, flavor: "The Reeve is lighting the fire.", docs: "https://kubernetes.io/docs/concepts/workloads/pods/pod-lifecycle/"}
+  - {k8s: Running, name: Burning, flavor: "The hut is alive.", docs: "https://kubernetes.io/docs/concepts/workloads/pods/pod-lifecycle/#pod-phase"}
+  - {k8s: CrashLoopBackOff, name: Guttering hut, flavor: "Relit after 10s, 20s, 40s ... up to 5 minutes.", docs: "https://kubernetes.io/docs/concepts/workloads/pods/pod-lifecycle/#container-restarts"}
+  - {k8s: OOMKilled, name: Voidtaken, flavor: "Took more housing than its Binding allowed.", docs: "https://kubernetes.io/docs/tasks/configure-pod-container/assign-memory-resource/"}
+  - {k8s: Evicted, name: Banished, flavor: "Sent away when the Keep starved.", docs: "https://kubernetes.io/docs/concepts/scheduling-eviction/node-pressure-eviction/"}
+  - {k8s: Terminating, name: Last Rites, flavor: "SIGTERM, a grace period, then SIGKILL.", docs: "https://kubernetes.io/docs/concepts/workloads/pods/pod-lifecycle/#pod-termination"}
+  - {k8s: Completed, name: Quest Fulfilled, flavor: "The work is done.", docs: "https://kubernetes.io/docs/concepts/workloads/pods/pod-lifecycle/"}
+  - {k8s: Error, name: Snuffed, flavor: "The worker stopped with an error.", docs: "https://kubernetes.io/docs/concepts/workloads/pods/pod-lifecycle/"}
+  - {k8s: Requests, name: Pilgrims, flavor: "Traffic: the people your realm serves.", docs: "https://kubernetes.io/docs/concepts/services-networking/service/"}
+  - {k8s: SLO, name: The Nines, flavor: "The share of pilgrims served well.", docs: "https://sre.google/sre-book/service-level-objectives/"}
+  - {k8s: metrics-server, name: Augury, flavor: "The Augur reads the Omens: how much food and housing each worker truly uses. kubectl top and the War Horn both depend on it.", docs: "https://kubernetes.io/docs/tasks/debug/debug-cluster/resource-metrics-pipeline/"}
+  - {k8s: HorizontalPodAutoscaler, name: War Horn, flavor: "Sounded every 15 seconds in the Stewards' Hall: it reads the Omens and calls huts to a crew when they grow hungry, or sends them home when it cools. kubectl autoscale deployment porters --min=2 --max=10 --cpu=70%", docs: "https://kubernetes.io/docs/concepts/workloads/autoscaling/horizontal-pod-autoscale/"}
+  - {k8s: Target utilization, name: "The Horn's Pitch", flavor: "The share of each worker's Food Pledge the Horn aims for. desired = ceil(current x utilization / target); within 10% of the pitch the Horn stays silent. No Pledge, no Horn.", docs: "https://kubernetes.io/docs/concepts/workloads/autoscaling/horizontal-pod-autoscale/#algorithm-details"}
+  - {k8s: Stabilization window, name: "The Horn's Memory", flavor: "Before sending workers home, the Horn keeps the highest call of the last 300 seconds, so a passing lull does not empty the crew.", docs: "https://kubernetes.io/docs/concepts/workloads/autoscaling/horizontal-pod-autoscale/#stabilization-window"}
+  - {k8s: minReplicas / maxReplicas, name: Muster Floor and Ceiling, flavor: "The lowest and highest count the Horn may keep. On food alone the floor is at least 1: scale to zero needs object or external Omens.", docs: "https://kubernetes.io/docs/reference/kubernetes-api/workload-resources/horizontal-pod-autoscaler-v2/"}
+  - {k8s: Sidecar container, name: Familiar, flavor: "An init container with restartPolicy: Always. It arrives before the workers, shares the hut's fire (network) and cellar (volumes), counts toward the hut's Pledge, is relit on its own when it stops, and leaves only after the workers have stopped. The Raven carries the chronicles (a log shipper); the Hound meets every pilgrim at the door (a proxy).", docs: "https://kubernetes.io/docs/concepts/workloads/pods/sidecar-containers/#pod-sidecar-containers"}
+  - {k8s: kubectl drain, name: Drain, flavor: "Seals the Keep's gates (cordon), then evicts its huts through the Eviction API, which honours PodDisruptionBudgets, so their crews raise them elsewhere. Mirror pods stay; DaemonSet pods need --ignore-daemonsets; bare huts need --force.", docs: "https://kubernetes.io/docs/tasks/administer-cluster/safely-drain-node/#use-kubectl-drain-to-remove-a-node-from-service"}
+  - {k8s: PodDisruptionBudget, name: Quorum, flavor: "How many huts a crew must keep standing (minAvailable), or may have away (maxUnavailable), during voluntary disruptions such as a drain. An eviction that would break the Quorum is refused with 429, and the drain waits.", docs: "https://kubernetes.io/docs/concepts/workloads/pods/disruptions/#pod-disruption-budgets"}
+  - {k8s: Zone, name: Isle, flavor: "topology.kubernetes.io/zone: a logical failure domain. Keeps on one Isle may fall together; Keeps on different Isles should not.", docs: "https://kubernetes.io/docs/reference/labels-annotations-taints/#topologykubernetesiozone"}
+  - {k8s: Node unreachable, name: Storm, flavor: "The Keep's Reeve falls silent: its Ready condition turns Unknown and the Stewards set the node.kubernetes.io/unreachable NoExecute Ward. Each hut's automatic 300s Charm runs out, then it is evicted.", docs: "https://kubernetes.io/docs/concepts/scheduling-eviction/taint-and-toleration/#taint-based-evictions"}
+  - {k8s: Instance type, name: Keep size, flavor: "node.kubernetes.io/instance-type: the kind of Keep the land provider raised. Better to ask for what a hut needs (food, housing, a Relic) than for a Keep by name.", docs: "https://kubernetes.io/docs/reference/labels-annotations-taints/#nodekubernetesioinstance-type"}
+  - {k8s: Pod topology spread constraints, name: Spread, flavor: "spec.topologySpreadConstraints: maxSkew, topologyKey and whenUnsatisfiable keep a crew's workers spread across Isles or Keeps, so one Storm cannot take them all.", docs: "https://kubernetes.io/docs/concepts/scheduling-eviction/topology-spread-constraints/"}
+plain:
+  - {term: Burning, means: up and ready for boxes, first: dev}
+  - {term: Kindling, means: "starting up, not ready yet", first: dev}
+  - {term: Banished, means: turned out of a crowded Keep, first: staging}
+  - {term: exposed, means: opened to take boxes at its door, first: dev, quiet: true}
+  - {term: Forum, means: where Unhoused huts wait, first: dev}
+  - {term: badge it looks for, means: which badge to match, first: dev, quiet: true}
+  - {term: badge, means: a tag on a hut, first: dev, quiet: true}
+  - {term: Pitch, means: the usage the Horn aims for, first: dev}
+  - {term: Guttering, means: stops at each start and is relit, first: dev}
+  - {term: Tremor, means: the Imp topples a hut, first: dev}
+  - {term: Voidtaken, means: killed for using too much housing, first: dev}
+  - {term: Unfit for Duty, means: "not ready: takes no boxes", first: staging}
+  - {term: Press-Gang, means: a shift adopts matching bare huts, first: staging}
+  - {term: Reeve, means: the Keep's overseer who lights huts}
+  - {term: Quartermaster, means: picks a Keep for each hut}
+  - {term: Stewards, means: hold your counts and rolls true}
+  - {term: Chancery, means: where every order is filed}
+  - {term: Codex, means: the realm's record book}
+  - {term: Citadel, means: the realm's control center}
+  - {term: Wayfinder, means: routes boxes to the right hut}
+  - {term: Herald, means: turns depot names into addresses}
+  - {term: Imp, means: a saboteur that topples huts}
+  - {term: Unhoused, means: waiting for a Keep with room}
+  - {term: Pledge, means: how much a worker reserves}
+  - {term: Binding, means: the most a worker may use}
+  - {term: Ward, means: a mark that bars huts}
+  - {term: Last Rites, means: shutting down for good}
+  - {term: fief, means: a named part of the realm}
+  - {term: Writ, means: the authority a hut acts under}
+  - {term: Charm, means: lets a hut pass a Ward}
+  - {term: Royal Ward, means: bars ordinary huts from the Tower}
+  - {term: Unready Ward, means: bars huts from an unready Keep}
+  - {term: Crowding Ward, means: bars huts from a crowded Keep}
+  - {term: Crowding, means: a Keep out of housing}
+  - {term: Cellar Ward, means: bars huts from full ground}
+  - {term: Cellar, means: "a hut's scratch space, in barrels"}
+  - {term: Vagrant, means: a hut that pledged nothing}
+  - {term: Freeman, means: "pledged something, may take more"}
+  - {term: Landed, means: pledge equals binding}
+  - {term: War Horn, means: adds or removes huts automatically}
+  - {term: Familiar, means: a helper beside a worker}
+  - {term: Raven, means: carries logs off the Keep}
+  - {term: Hound, means: re-sends boxes a stopped worker dropped}
+  - {term: Isle, means: Keeps that fail together}
+  - {term: Rank, means: how much a hut matters}
+  - {term: Displacement, means: a higher Rank bumps a lower}
+  - {term: Augury, means: measures what each worker uses}
+  - {term: Omens, means: the measured usage figures}
+  - {term: Nines, means: how reliably you serve boxes}
+  - {term: Shutters, means: wait for a hut to be ready, first: staging}
+  - {term: Bell, means: relights a worker that stops answering, first: dev}
+  - {term: Speaking Stone, means: the command line}
+  - {term: Scriptorium, means: where you write config files}
+  - {term: Almanac, means: the game's reference book}
+  - {term: Grimoire, means: the pages you learn}
+  - {term: Academy, means: where trades are bought}
+  - {term: Chronicle of Woe, means: a quiz about a trouble}
+  - {term: Chronicle, means: a hut's own log}
+  - {term: Gate, means: where boxes enter the realm}
+  - {term: Quay, means: where boxes wait to be carried}
+  - {term: Berth, means: a mooring place for one ship}
+  - {term: Golden Thread, means: a lasting reward for later realms}
+  - {term: Rush Tide, means: a surge of boxes to weather}
+  - {term: Drain, means: empty a Keep to close it}
+  - {term: Quorum, means: how many of a crew must stand}
+  - {term: seasoned, means: carried enough boxes to speed up, quiet: true}
+  - {term: Harbor gate, means: where pilgrims come in from outside}
+  - {term: Signpost, means: points pilgrims to their depots}
+  - {term: Foreign hall, means: a kind brought from abroad}
+  - {term: Heraldry view, means: shows each fief in its colours}
+  - {term: Crest, means: "a fief's colours and shape"}
+  - {term: Pennant, means: "a fief's flag on a Keep"}

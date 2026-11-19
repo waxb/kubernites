@@ -1,0 +1,21 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: crasher
+  namespace: signals
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: crasher
+  template:
+    metadata:
+      labels:
+        app: crasher
+    spec:
+      terminationGracePeriodSeconds: 1
+      containers:
+      - name: worker
+        image: busybox:1.37
+        imagePullPolicy: IfNotPresent
+        command: ["sh", "-c", "echo opening the ledger; echo the ledger is missing; exit 1"]

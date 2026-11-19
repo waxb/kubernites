@@ -1,0 +1,14 @@
+/pkg/live/ @waxb
+/pkg/kubectl/ @waxb
+/pkg/client/app/*live*.go @waxb
+/pkg/client/hud/*live*.go @waxb
+/pkg/client/app/stone*.go @waxb
+/pkg/client/hud/stone*.go @waxb
+/pkg/client/hud/script*.go @waxb
+/cmd/kubernites/ @waxb
+/.github/ @waxb
+/go.mod @waxb
+/go.sum @waxb
+/LICENSE @waxb
+/NOTICE @waxb
+/SECURITY.md @waxb

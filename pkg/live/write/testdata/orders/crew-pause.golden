@@ -1,0 +1,16 @@
+PATCH /apis/apps/v1/namespaces/shop/deployments/web?fieldManager=kubernites
+verb: pause
+content-type: application/strategic-merge-patch+json
+access review: {"verb":"patch","group":"apps","version":"v1","resource":"deployments","namespace":"shop","name":"web"}
+classes: []
+preview field: paused spec.paused (was "false")
+kubectl: kubectl rollout pause deployment/web -n shop
+body:
+{
+  "metadata": {
+    "resourceVersion": "4711"
+  },
+  "spec": {
+    "paused": true
+  }
+}

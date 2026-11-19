@@ -1,0 +1,22 @@
+name: Idea
+description: Something the realm could show or do.
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: Kubernites reads by default and changes a cluster only at a level chosen before connecting. Ideas for new orders or commands are welcome; each one goes through the write gate.
+  - type: textarea
+    id: idea
+    attributes:
+      label: The idea
+    validations:
+      required: true
+  - type: textarea
+    id: kubernetes
+    attributes:
+      label: The Kubernetes behind it
+      description: Which objects, fields or states it shows. A link to kubernetes.io helps.
+  - type: textarea
+    id: why
+    attributes:
+      label: Why it helps

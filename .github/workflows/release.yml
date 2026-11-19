@@ -1,0 +1,106 @@
+name: release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: build (${{ matrix.goos }}-${{ matrix.goarch }})
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - {os: ubuntu-24.04, goos: linux, goarch: amd64}
+          - {os: ubuntu-24.04-arm, goos: linux, goarch: arm64}
+          - {os: windows-2025, goos: windows, goarch: amd64}
+          - {os: macos-15, goos: darwin, goarch: arm64}
+          - {os: macos-15-intel, goos: darwin, goarch: amd64}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    env:
+      CGO_ENABLED: "0"
+      GOOS: ${{ matrix.goos }}
+      GOARCH: ${{ matrix.goarch }}
+      TAG: ${{ github.ref_name }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
+        with:
+          go-version-file: go.mod
+          cache: false
+      - name: build the binary and its notices
+        shell: bash
+        run: |
+          mkdir -p dist
+          go build -trimpath -ldflags "-s -w" -o "dist/kubernites$(go env GOEXE)" ./cmd/kubernites
+          cp LICENSE NOTICE README.md dist/
+          go list -deps -f '{{with .Module}}{{if not .Main}}{{.Path}}@{{.Version}} {{.Dir}}{{end}}{{end}}' ./cmd/kubernites | sort -u > modules.txt
+          {
+            echo "Kubernites $TAG for $GOOS/$GOARCH is built from these Go modules. Their license and notice files follow."
+            while read -r module dir; do
+              echo
+              echo "== $module"
+              for f in "$dir"/LICENSE* "$dir"/LICENCE* "$dir"/COPYING* "$dir"/NOTICE*; do
+                if [ -f "$f" ]; then
+                  echo "-- $(basename "$f")"
+                  cat "$f"
+                fi
+              done
+            done < modules.txt
+            echo
+            echo "== the Go standard library and runtime ($(go env GOVERSION))"
+            cat "$(go env GOROOT)/LICENSE"
+          } > dist/THIRD_PARTY_NOTICES.txt
+          ls -l dist
+      - name: pack (tar.gz)
+        if: matrix.goos != 'windows'
+        shell: bash
+        run: tar -czf "kubernites-$TAG-$GOOS-$GOARCH.tar.gz" -C dist .
+      - name: pack (zip)
+        if: matrix.goos == 'windows'
+        shell: pwsh
+        run: Compress-Archive -Path dist/* -DestinationPath "kubernites-$env:TAG-$env:GOOS-$env:GOARCH.zip"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: kubernites-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: kubernites-*
+          if-no-files-found: error
+
+  release:
+    name: draft release
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+        with:
+          path: out
+          merge-multiple: true
+      - name: checksums and a draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          cd out
+          sha256sum kubernites-* > SHA256SUMS
+          cat SHA256SUMS
+          cat > ../notes.md <<'EOF'
+          Unpack the archive for your system and run `kubernites` (`kubernites.exe` on Windows). On Linux, the README lists the runtime packages it needs.
+
+          The macOS builds are not signed or notarized. macOS blocks them the first time: allow the program under System Settings, Privacy & Security, Open Anyway, or remove the quarantine mark with `xattr -d com.apple.quarantine kubernites`.
+
+          Each archive holds LICENSE, NOTICE and THIRD_PARTY_NOTICES.txt, the licenses of the Go modules built into that binary. SHA256SUMS lists the archives' checksums.
+          EOF
+          gh release create "$TAG" kubernites-* SHA256SUMS --repo "$GITHUB_REPOSITORY" --draft --verify-tag --title "Kubernites $TAG" --notes-file ../notes.md

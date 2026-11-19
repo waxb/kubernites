@@ -1,0 +1,22 @@
+PATCH /apis/apps/v1/namespaces/shop/deployments/web?fieldManager=kubernites
+verb: restart
+content-type: application/strategic-merge-patch+json
+access review: {"verb":"patch","group":"apps","version":"v1","resource":"deployments","namespace":"shop","name":"web"}
+classes: []
+preview field: restartedAt spec.template.metadata.annotations.kubectl.kubernetes.io/restartedAt (was "2026-11-01T08:00:00Z")
+kubectl: kubectl rollout restart deployment/web -n shop
+body:
+{
+  "metadata": {
+    "resourceVersion": "4711"
+  },
+  "spec": {
+    "template": {
+      "metadata": {
+        "annotations": {
+          "kubectl.kubernetes.io/restartedAt": "2026-11-15T21:04:05Z"
+        }
+      }
+    }
+  }
+}

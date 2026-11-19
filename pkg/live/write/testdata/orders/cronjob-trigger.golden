@@ -1,0 +1,53 @@
+POST /apis/batch/v1/namespaces/batch/jobs?fieldManager=kubernites
+verb: trigger
+content-type: application/json
+access review: {"verb":"create","group":"batch","version":"v1","resource":"jobs","namespace":"batch"}
+classes: []
+preview field: job metadata.name (was "")
+kubectl: kubectl create job nightly-report-manual-x7k --from=cronjob/nightly-report -n batch
+body:
+{
+  "kind": "Job",
+  "apiVersion": "batch/v1",
+  "metadata": {
+    "name": "nightly-report-manual-x7k",
+    "namespace": "batch",
+    "labels": {
+      "app": "report"
+    },
+    "annotations": {
+      "cronjob.kubernetes.io/instantiate": "manual",
+      "owner": "ops"
+    },
+    "ownerReferences": [
+      {
+        "apiVersion": "batch/v1",
+        "kind": "CronJob",
+        "name": "nightly-report",
+        "uid": "uid-cron",
+        "controller": true
+      }
+    ]
+  },
+  "spec": {
+    "template": {
+      "metadata": {},
+      "spec": {
+        "containers": [
+          {
+            "name": "report",
+            "image": "busybox:1.37",
+            "command": [
+              "sh",
+              "-c",
+              "date"
+            ],
+            "resources": {}
+          }
+        ],
+        "restartPolicy": "OnFailure"
+      }
+    }
+  },
+  "status": {}
+}

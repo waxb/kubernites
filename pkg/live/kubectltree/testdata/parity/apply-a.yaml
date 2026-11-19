@@ -1,0 +1,10 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: settings-a
+  namespace: parity
+  labels:
+    tier: front
+data:
+  greeting: hello from the Stone
+  level: "3"

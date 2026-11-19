@@ -1,0 +1,17 @@
+DELETE /api/v1/namespaces/shop/pods/web-h3-abcde
+verb: kill
+content-type: application/json
+access review: {"verb":"delete","version":"v1","resource":"pods","namespace":"shop","name":"web-h3-abcde"}
+classes: []
+preview field: deletionTimestamp metadata.deletionTimestamp (was "")
+kubectl: kubectl delete pod/web-h3-abcde -n shop --now
+body:
+{
+  "apiVersion": "v1",
+  "gracePeriodSeconds": 1,
+  "kind": "DeleteOptions",
+  "preconditions": {
+    "resourceVersion": "5150",
+    "uid": "uid-pod"
+  }
+}

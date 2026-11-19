@@ -1,0 +1,16 @@
+PATCH /api/v1/nodes/kind-worker?fieldManager=kubernites
+verb: uncordon
+content-type: application/strategic-merge-patch+json
+access review: {"verb":"patch","version":"v1","resource":"nodes","name":"kind-worker"}
+classes: []
+preview field: unschedulable spec.unschedulable (was "true")
+kubectl: kubectl uncordon kind-worker
+body:
+{
+  "metadata": {
+    "resourceVersion": "777"
+  },
+  "spec": {
+    "unschedulable": null
+  }
+}

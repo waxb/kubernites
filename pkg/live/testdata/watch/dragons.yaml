@@ -1,0 +1,11 @@
+apiVersion: lair.kubernites.example/v1
+kind: Dragon
+metadata:
+  name: dragon-a
+  namespace: listed
+---
+apiVersion: lair.kubernites.example/v1
+kind: Dragon
+metadata:
+  name: dragon-b
+  namespace: listed

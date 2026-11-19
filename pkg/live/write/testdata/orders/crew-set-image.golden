@@ -1,0 +1,25 @@
+PATCH /apis/apps/v1/namespaces/shop/deployments/web?fieldManager=kubernites
+verb: set image
+content-type: application/strategic-merge-patch+json
+access review: {"verb":"patch","group":"apps","version":"v1","resource":"deployments","namespace":"shop","name":"web"}
+classes: []
+preview field: web image spec.template.spec.containers.name=web.image (was "shop/web:1.4")
+kubectl: kubectl set image deployment/web -n shop web=shop/web:1.5
+body:
+{
+  "metadata": {
+    "resourceVersion": "4711"
+  },
+  "spec": {
+    "template": {
+      "spec": {
+        "containers": [
+          {
+            "image": "shop/web:1.5",
+            "name": "web"
+          }
+        ]
+      }
+    }
+  }
+}

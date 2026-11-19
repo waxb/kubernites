@@ -1,0 +1,16 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: doomed
+  namespace: signals
+spec:
+  backoffLimit: 0
+  template:
+    spec:
+      restartPolicy: Never
+      terminationGracePeriodSeconds: 1
+      containers:
+      - name: worker
+        image: busybox:1.37
+        imagePullPolicy: IfNotPresent
+        command: ["sh", "-c", "echo the quest fails; exit 1"]

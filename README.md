@@ -1,0 +1,125 @@
+[![CI](https://github.com/waxb/kubernites/actions/workflows/ci.yml/badge.svg)](https://github.com/waxb/kubernites/actions/workflows/ci.yml) [![Go](https://img.shields.io/github/go-mod/go-version/waxb/kubernites)](go.mod) [![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE) [![Go Reference](https://pkg.go.dev/badge/github.com/waxb/kubernites.svg)](https://pkg.go.dev/github.com/waxb/kubernites) [![Go Report Card](https://goreportcard.com/badge/github.com/waxb/kubernites)](https://goreportcard.com/report/github.com/waxb/kubernites) [![itch.io](https://img.shields.io/badge/itch.io-Kubernites-fa5c5c?logo=itchdotio&logoColor=white)](https://waxb.itch.io/kubernites)
+
+![Kubernites: a Kubernetes cluster drawn as a realm of Keeps, huts and fiefs on an island](assets/banner.png)
+
+# Kubernites
+
+Point Kubernites at a Kubernetes cluster and it draws that cluster as a realm you can walk around: the nodes are Keeps on an island, the pods are huts with their workers (the containers), the namespaces are fiefs, the Deployments are crews, and requests come in at the harbor. Click anything to see the real object behind it, with its state and its trouble: a pod in `CrashLoopBackOff` is a hut whose fire keeps going out. Labels use Kubernetes' own names; NAMES in the MENU switches them to the realm's.
+
+Kubernites draws the cluster live: it lists each kind once, then watches stream every change as it happens, as `kubectl get -w` and k9s do (a kind it may list but not watch is listed again every few seconds). The top bar reads WATCHING SINCE while that holds, and STALE SINCE if a watch breaks and does not recover. Beyond looking, it works as a cluster manager in the spirit of k9s:
+
+- **The Speaking Stone** (Enter) runs `kubectl` v1.37 itself, inside the process: `get`, `describe`, `logs`, `rollout`, `scale`, `apply` and the rest, with every request `kubectl` makes passing the same gate as the rest of Kubernites.
+- **Orders on the cards:** scale, restart, roll back, pause and resume, set image or resources, change an HPA's range, delete and kill; trigger a CronJob; cordon, uncordon and drain a node.
+- **The Scriptorium** edits any object as YAML and applies it server-side, showing the server's conflicts.
+- **DESCRIBE and YAML** on the cards.
+
+It opens every cluster read-only. Changing anything takes a level chosen before connecting.
+
+## Building
+
+You need Go 1.26.1 or later (the `go` line in `go.mod`; Go 1.21 or later downloads that toolchain by itself). Kubernites uses Ebitengine v2.10, which builds with Go alone on Windows, macOS and Linux: no C compiler and no development headers.
+
+```
+git clone https://github.com/waxb/kubernites
+cd kubernites
+go build ./cmd/kubernites
+```
+
+- **Windows and macOS:** nothing else is needed.
+- **Linux:** building needs nothing else, and `CGO_ENABLED=0` works too. Running needs an X server (or XWayland in a Wayland session) and OpenGL. On Debian and Ubuntu: `sudo apt install libx11-6 libgl1 libglx-mesa0`; on Fedora: `sudo dnf install libX11 libglvnd-glx mesa-libGL mesa-dri-drivers`. Ebitengine's [install page](https://ebitengine.org/en/documents/install.html) lists other distributions and the optional X11 and ALSA packages.
+
+## Using it
+
+```
+./kubernites                           # reads $KUBECONFIG, else ~/.kube/config
+./kubernites -kubeconfig path/to/config
+./kubernites -readonly                 # READ ONLY for this run, whatever was remembered
+./kubernites -version                  # prints the version and exits
+```
+
+1. On the title page, choose LIVE CLUSTER (or press 3).
+2. Read the warning, then press Y to let Kubernites read your kubeconfig and list its contexts. Nothing is chosen for you.
+3. Pick a context with the arrow keys or the mouse, and press Enter. The next page names the context, the server, the user, and who the cluster says you are.
+4. The READ ONLY box beside CONNECT is ticked: press Y to connect read-only. To allow changes, untick it first and pass its warning (WRITES), and a second one for DANGEROUSLY SEAMLESS.
+
+Then look around: WASD pans, the mouse wheel zooms, a click opens what you clicked, and Enter opens the Speaking Stone. STONE in the MENU switches the Stone between `kubectl` and the realm's own read commands.
+
+## Read-only by default
+
+Kubernites connects at one of three levels, chosen in the context picker before it connects. An open connection never changes level: to change it, go back to the picker and connect again.
+
+| Level | How it is chosen | What it may send |
+|---|---|---|
+| READ ONLY | the READ ONLY box beside CONNECT, ticked at every connect; `-readonly` forces it for one run | reads only, through the read-only gate below |
+| WRITES | untick READ ONLY, past a warning that names the context, the API server and the kubeconfig user | every order and `kubectl` command, each after the server's dry-run preview and CONFIRM; a card order whose dry run an admission webhook cannot take goes without a preview, after its own warning |
+| DANGEROUSLY SEAMLESS | a second, stronger warning | orders and commands with no preview and no CONFIRM, as `kubectl` sends them; each card order still asks once (Y, or Enter on its form), as k9s asks before a restart, rollback, trigger, cordon, delete or drain; only KILL goes from one chord, as k9s's kill does |
+
+The level is remembered per context, keyed by the context name, the API server and the user entry together: if the server or the user behind a name changes, the choice is dropped and the warnings show again. It is kept in Kubernites' own settings directory, never in the kubeconfig, and RESET LIVE CHOICES in the MENU forgets it.
+
+At WRITES and DANGEROUSLY SEAMLESS alike, four kinds of request need their own warning on first use, previews included:
+
+- **Secrets:** reading, creating or changing one. Values stay masked until revealed key by key, and no value reaches the ledger.
+- **Reaching into a workload:** a shell or command in a container (`exec`), `attach`, `port-forward`, `cp`, `debug` (an ephemeral container, a copy of a Pod or a Node's debug Pod), `run -i`/`-t`, and the `proxy` of a Pod, Service or Node. A connection has no dry run: at WRITES its CONFIRM shows what it opens (the object, the container, the command or the ports). At READ ONLY none of them leaves.
+- **Destroying more than one thing:** deleting a namespace, a node, a PersistentVolume, a CRD, an RBAC object or an admission webhook or policy; deleting by collection, label or field selector; a Stone `delete` of several names or kinds or with `--all`, and `apply --prune`; a delete or an eviction with a grace period of 0; finalizing a namespace.
+- **A change without a preview:** a card order whose dry run an admission webhook cannot take, at WRITES.
+
+RESET LIVE CHOICES forgets the passed warnings too.
+
+**API groups Kubernites cannot preview.** At WRITES every change is first sent as a server dry run (`dryRun=All`), and CONFIRM shows its answer. Kubernetes guarantees that a dry run changes nothing for the groups the API server serves itself: the built-in groups and those of CustomResourceDefinitions. A group whose APIService names a service is served by an aggregated API server instead, a separate server the API server forwards those requests to, and whether it honours a dry run is up to its own code: it could make the change during the preview, before CONFIRM. So at WRITES a change to such a group is refused, with that reason; at DANGEROUSLY SEAMLESS it is sent as `kubectl` sends it. Kubernites learns which groups the API server serves itself by listing the APIServices when it connects. If the user may not list them (a cluster-wide read), only the built-in groups count as previewable, and at WRITES a change to any custom resource is refused too.
+
+Every change that reaches the server is recorded after it is sent: a line in the context's ledger file (which keeps its newest lines, up to 1 MiB), on the live card and in the Stone's history. No change is sent while the picture is stale, and none is sent on Kubernites' own: time passing, trouble shown in the realm, the MENU and plain keys never send a change. Every order starts from a Control chord; once an order or the Stone is open, Enter or Y sends what it shows.
+
+The Stone has a terminal for `exec -it`, `attach -it`, `debug -it` and `run -it`: the container's screen is drawn in the Stone, its TTY takes the Stone's size, and every key goes to the container, Control chords included. ctrl-p ctrl-q, `kubectl attach`'s own detach keys, leaves and never reaches the container. `port-forward` listens on `127.0.0.1` only, whatever address is typed; the live card lists every open forward with STOP, and every forward closes with the connection. `cp` runs `tar` in the container, as `kubectl` does; a relative local path is taken from `~/Downloads/Kubernites` (made when first needed), never from the working directory, and `~` and absolute paths as typed. cp never writes `~/.kube` or the kubeconfig chosen at connect, never replaces a local file that already exists without asking first, and its CONFIRM names the local path; the Stone names every local path it read or wrote. Each session and forward is a ledger line with the object, the container, the command and how it ended, never what was typed or shown.
+
+### How the code holds it
+
+At READ ONLY, every request passes the read-only gate in [`pkg/live/readonly.go`](pkg/live/readonly.go), which wraps the connection's HTTP transport. It lets a request leave the process only if it is:
+
+- a GET of the Kubernetes API (watches, pod logs, discovery, `/version`, `/openapi`, `/healthz`, `/livez` and `/readyz` included), but never of a Secret and never of the `exec`, `attach`, `portforward` or `proxy` subresources; or
+- a POST of one of three questions that change nothing in the cluster: a SelfSubjectReview (who am I), a SelfSubjectAccessReview or a SelfSubjectRulesReview (what may I do).
+
+Everything else is refused inside the process with an error, before anything is sent: every PUT, PATCH and DELETE, any other POST, any connection upgrade, an escaped or unusual path, and a path outside the cluster's API.
+
+At WRITES and DANGEROUSLY SEAMLESS, the write gate in [`pkg/live/write`](pkg/live/write) wraps the transport instead. It is the only way out for a request other than a GET and those three questions: the card orders are built inside it, the Stone's `kubectl` sends through it, and it is never built at READ ONLY. At WRITES a change leaves only with a one-use ticket that CONFIRM issues for exactly that request. A card's DRAIN is the one exception: its CONFIRM lets each eviction it lists be tried again every 5 seconds, up to 120 times, while a PodDisruptionBudget refuses it (`429`), as `kubectl drain` retries; those tries end when that Pod is evicted or gone, when its eviction fails for another reason, and when the drain stops or ends. The gate itself checks the Secrets, workloads and destroy warnings, previews included; lets a connection upgrade or a channel through only for a Pod's `exec`, `attach`, `portforward` or `proxy` and a Service's or Node's `proxy`, never as a dry run and, at WRITES, only with its ticket; and refuses every change and every new connection while the picture is stale. The card asks the no-preview warning before such a change is sent.
+
+The Stone runs `kubectl`'s own command tree with the gate as the innermost transport of every client `kubectl` builds. In the Stone, `kubectl` cannot write the kubeconfig, reach another kubeconfig, context or server, run plugins or an outside editor, or fetch a manifest from the web.
+
+These tests hold it:
+
+- `TestOnlyReadsAndAccessReviewsLeaveTheProcess`, `TestARequestOutsideTheBasePathIsRefused`, `TestAConnectionUpgradeIsRefusedEvenOnAGet` and `TestAnEncodedPathIsRefused` (`pkg/live/readonly_test.go`) try the read-only gate with every method on every kind of path;
+- `TestAWriteForcedThroughTheConnectionIsRefusedBeforeTheServer` (`pkg/live/nowrite_test.go`) sends POST, PUT, PATCH, DELETE and a Secret read through a READ ONLY connection to a test server, and checks that the server saw nothing;
+- `TestTheLivePackageCanOnlyBuildReads` (`pkg/live/nowrite_test.go`) and `TestOnlyTheWriteGateBuildsARequestThatIsNotAGet` (`pkg/live/write/source_test.go`) read the source and fail if anything outside the write gate and the Stone's `kubectl` imports a client that can write or builds a request other than a GET and the access questions;
+- `TestAFullLiveSessionSendsNoWrite` (`pkg/live/session_test.go`) opens a recorded cluster at READ ONLY, tries every order and every `kubectl` write command, and checks that the test server saw no write;
+- `TestTheGateIsNeverBuiltAtReadOnly`, `TestAtWritesAChangeNeedsItsTicketAndTheTicketIsUsedOnce`, `TestARevokedTicketPassesNothing`, `TestEachClassNeedsItsWarningEvenForAPreview`, `TestAStaleRealmSendsNoChangeAndNoPreview` and `TestNothingOutsideTheAPIOrOddPassesAtAnyLevel` (`pkg/live/write/gate_test.go`), `TestReachingIntoAWorkloadClimbsTheLadder`, `TestOnlyAPodsChannelsAndProxiesReachIntoAWorkload`, `TestTheWorkloadsWarningIsAskedOncePerContextAndAgainAfterReset` and `TestAStaleRealmOpensNoWorkloadSession` (`pkg/live/write/workloads_test.go`), `TestAtReadOnlyNothingReachesIntoAWorkload` (`pkg/live/workloads_readonly_test.go`), `TestAtReadOnlyTheStoneReachesIntoNoWorkload` (`pkg/live/kubectltree/workloads_test.go`), `TestAWorkloadDoorWithStdinNeedsTheStonesTerminal` (`pkg/live/kubectltree/prune_test.go`), `TestCtrlPCtrlQLeavesTheTerminalAndNeverReachesTheContainer` and `TestClosingTheTreeEndsTheSessionCleanly` (`pkg/live/kubectltree/terminal_test.go`), `TestPortForwardListensOn127001OnlyWhateverAddressIsTypedAndStaysOpenUntilStop` and `TestEveryForwardClosesWithTheRealm` (`pkg/live/kubectltree/forward_test.go`), `TestCpNeverReadsOrWritesOutsideThePathsTyped` (`pkg/live/kubectltree/cp_test.go`), `TestOnlyTheConfirmedChoiceBuildsTheGateAndOnlyCONFIRMIssuesATicket` (`pkg/live/write/source_test.go`), `TestAtWritesNothingButReviewsAndDryRunsLeaveUntilConfirm` and `TestTheLedgerKeepsOneLinePerWriteAndNoSecretValue` (`pkg/live/write/send_test.go`), `TestAJSONPatchOrAnEscapedPatchOfASecretLeavesNoValueInTheLedger` (`pkg/live/write/ledger_patch_test.go`) and `TestSecretValuesAreMaskedUntilRevealedKeyByKey` (`pkg/live/write/secrets_test.go`) hold the write gate;
+- `TestEveryConfigTheTreeHandsToKubectlGoesThroughTheGate` (`pkg/live/kubectltree/source_test.go`), `TestEveryRequestTheTreeMakesPassesTheGate`, `TestAtReadOnlyNoWriteLeavesTheGame`, `TestTheKubeconfigIsNeverWritten` and `TestTheTreeUsesOnlyTheChosenKubeconfigAndContext` (`pkg/live/kubectltree/tree_test.go`) and `TestPluginsAreOff` (`pkg/live/kubectltree/prune_test.go`) hold the Stone's `kubectl`;
+- `TestTheGameNeverWritesOnItsOwn` (`pkg/client/livescenes/never_writes_test.go`) runs time, trouble, the MENU, plain keys and typed letters at DANGEROUSLY SEAMLESS and checks that nothing is sent;
+- the connected server and credentials: `TestTheStoneKeepsTheServerAndCredentialsResolvedAtConnectAtEveryLevel`, `TestTheWriteGateRefusesAConfigForAnotherServerOrUser`, `TestAtSeamlessTheStoneNeverFollowsAKubeconfigRewrittenAfterConnect`, `TestAtWritesTheConfirmsDryRunAndTheWriteGoToTheConnectedServerOnly`, `TestTheStoneNeverWritesToAServerAKubeconfigRewriteNames` (`pkg/live/kubectltree`), `TestARedirectNeverCarriesTheCredentialsToAnotherHost` (`pkg/live`) and `TestTheWriteGateFollowsNoRedirectToAnotherHost` (`pkg/live/write`);
+- Secret values: `TestTheConfirmShowsASecretsFieldNamesOnlyAndNoBodyThatIsNotJSON` and `TestOnlyACoreSecretsHiddenValuesAreReadBackOnSend` (`pkg/client/app`), `TestSecretValuesNeverComeBackThroughADryRunWrite`, `TestEveryAnswerUnderSecretsReachesTheStoneMasked`, `TestANewSecretsValuesNeverReachTheConfirmOrTheLedger`, `TestAClientDryRunNeverPrintsASecretValue`, `TestNoClientSideRunPrintsASecretValueInAnyForm`, `TestAScriptoriumSendWritesNoSecretToDisk`, `TestConfigViewShowsNoKubeconfigCredential` and `TestConfigViewRedactsEveryCredentialOfEveryUserInEveryForm` (`pkg/live/kubectltree`), `TestAnAnswerUnderSecretsCarriesNoValueWhateverTheMethod` (`pkg/live/write`);
+- CONFIRM and tickets: `TestOneAskAtATimeAndEachAnswerReleasesTheAskShown`, `TestTheStoryConfirmSaysWhatItChanges` and `TestResetLiveChoicesForgetsTheWarningsPassedOnTheOpenConnection` (`pkg/client/app`), `TestAControlChordNeverPassesAWarningOrAConfirmAndAnAskIsSeenAQuarterSecondFirst` and `TestAControlChordNeverPassesThePickersWarning` (`pkg/client/hud`), `TestADrainAsksOneConfirmAtATimeAndEachReleasesTheEvictionItShows`, `TestARefusedSendLeavesNoTicketBehind` and `TestAtWritesTheStoneSendsNoChangeWithoutItsPreviewEvenToAnAggregatedAPIServer` (`pkg/live/kubectltree`), `TestARefusedSendUsesUpItsTicket`, `TestTwoConfirmsOfOneRequestReleaseItOnce`, `TestADrainLeavesNoTicketBehind`, `TestADryRunGoesWithoutATicketOnlyToAnAPIServerThatHonoursIt` and `TestForgetClearsEveryWarningPassedOnTheGate` (`pkg/live/write`);
+- class warnings: `TestDeletingBySelectorAsksTheDestroyingWarning` and `TestEveryDeleteOfMoreThanOneThingAsksTheDestroyingWarning` (`pkg/live/kubectltree`), `TestAZeroGracePeriodInAnySpellingIsAForcedDelete` and `TestAnUpgradeIsSeenWhateverItsHeadersCase` (`pkg/live/write`), `TestAWebsocketProtocolHeaderAloneIsRefusedAtReadOnly` (`pkg/live`), `TestAtSeamlessADrainAsksFirstAsK9sDoesAndTheWarningNamesEveryOneChordWrite` and `TestAtSeamlessEveryCardOrderAsksOnceExceptKillAsK9sDoes` (`pkg/client/app`);
+- what the Stone's `kubectl` may not do: `TestShellCompletionIsRefusedBehindAnEmptyWord` and `TestShellCompletionIsRefusedHoweverItIsReached` (plugins, beside `TestPluginsAreOff`), `TestDebugNeverFetchesAManifestFromTheWeb`, `TestDebugTakesNamesOnlyAndNeverAFileTheWebOrStandardInput`, `TestDebugOfALocalPodFileNeverEndsTheProcess`, `TestALocalReadThatBlocksEndsOnStopAndClose`, `TestNoLocalReadCanWaitForeverAndCloseNeverWaitsForACommand`, `TestStoppingAForwardWhileItsConfirmWaitsNeverBlocks` and `TestAStoneCommandKeepsItsOutputBounded` (`pkg/live/kubectltree`);
+- cp's local side: `TestCpDotNeverWritesTheKubeconfigOrDotfilesInHome`, `TestCpRelativePathsLandUnderDownloadsKubernitesAndAbsolutePathsAsTyped`, `TestCpNeverWritesDotKubeOrAConnectedKubeconfig`, `TestCpAsksBeforeOverwritingAnExistingLocalFile`, `TestTheCpConfirmNamesTheLocalSide`, `TestCpNamesEveryLocalPathItWrote` and `TestCpUploadSendsOnlyThePathTyped` (`pkg/live/kubectltree`), `TestTheCpConfirmNamesTheLocalSideAndAnOverwriteIsAsked` (`pkg/client/app`);
+- the terminal and the ledger: `TestOneRepeatSequenceNeverPinsTheView`, `TestMalformedSequencesNeverPanicOrHang`, `TestCombiningMarksKeepTheViewsMemoryBounded` and `TestAClusterOfMarksIsCappedAndTheViewKeepsNoScrollback` (`pkg/client/termview`), `TestALineWithoutAnEndIsCutIntoBoundedLines` (`pkg/client/hud`), `TestAWorkersShellAttachAndLogsReachThatWorker` and `TestAForwardThatOpensAndEndsBetweenTwoFramesIsStillInTheLedger` (`pkg/client/app`).
+
+They run on every pull request: `TestTheGameNeverWritesOnItsOwn` with the client's tests, the others in their own CI job, `gates`, each by name.
+
+What the gates cannot do: your credentials are real. Every request goes to the API server as the user your kubeconfig names, so the cluster's audit log records it, and your kubeconfig's exec plugins run as they do for `kubectl`. To only look at a cluster your credentials can change, connect at READ ONLY or use a read-only kubeconfig. See [SECURITY.md](SECURITY.md) to report a problem.
+
+## Contributing
+
+Pull requests are welcome. [CONTRIBUTING.md](CONTRIBUTING.md) says how to build and test, what belongs here, and why every commit needs a sign-off. Report security problems privately, as [SECURITY.md](SECURITY.md) describes.
+
+The banner above is drawn by Kubernites itself. To make it again, from this directory (on Linux without a display, start each command with `xvfb-run -a`):
+
+```
+KUBERNITES_CAPTURE=realm.png KUBERNITES_CAPTURE_SCENE=engineer-managed-isle go run ./cmd/kubernites
+go run ./assets/gen/banner -in realm.png -out assets/banner.png
+```
+
+## License
+
+Apache License 2.0: see [LICENSE](LICENSE) and [NOTICE](NOTICE).
+
+[![itch.io: the full game](https://img.shields.io/badge/itch.io-the_full_game-FA5C5C?logo=itchdotio&logoColor=white)](https://waxb.itch.io/kubernites)
+
+There is more to play in the full game on **[itch.io](https://waxb.itch.io/kubernites)**: a realm you build yourself from the first Keep, and a teacher who walks you through Kubernetes as you go. Buying it there keeps this project going.

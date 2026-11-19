@@ -1,0 +1,53 @@
+PATCH /apis/apps/v1/namespaces/shop/deployments/web?fieldManager=kubernites
+verb: roll back
+content-type: application/json-patch+json
+access review: {"verb":"patch","group":"apps","version":"v1","resource":"deployments","namespace":"shop","name":"web"}
+classes: []
+preview field: revision metadata.annotations.deployment.kubernetes.io/revision (was "3")
+preview field: web image spec.template.spec.containers.name=web.image (was "shop/web:1.4")
+kubectl: kubectl rollout undo deployment/web -n shop --to-revision=2
+body:
+[
+  {
+    "op": "replace",
+    "path": "/metadata/resourceVersion",
+    "value": "4711"
+  },
+  {
+    "op": "replace",
+    "path": "/spec/template",
+    "value": {
+      "metadata": {
+        "labels": {
+          "app": "web"
+        }
+      },
+      "spec": {
+        "containers": [
+          {
+            "name": "web",
+            "image": "shop/web:1.3",
+            "resources": {
+              "limits": {
+                "memory": "128Mi"
+              },
+              "requests": {
+                "cpu": "100m",
+                "memory": "64Mi"
+              }
+            }
+          }
+        ]
+      }
+    }
+  },
+  {
+    "op": "replace",
+    "path": "/metadata/annotations",
+    "value": {
+      "deployment.kubernetes.io/revision": "3",
+      "kubectl.kubernetes.io/last-applied-configuration": "{}",
+      "release": "r2"
+    }
+  }
+]

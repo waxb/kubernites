@@ -1,0 +1,33 @@
+PATCH /apis/apps/v1/namespaces/shop/deployments/web?fieldManager=kubernites
+verb: set resources
+content-type: application/strategic-merge-patch+json
+access review: {"verb":"patch","group":"apps","version":"v1","resource":"deployments","namespace":"shop","name":"web"}
+classes: []
+preview field: web requests cpu spec.template.spec.containers.name=web.resources.requests.cpu (was "100m")
+preview field: web limits memory spec.template.spec.containers.name=web.resources.limits.memory (was "128Mi")
+kubectl: kubectl set resources deployment/web -n shop -c web --limits=memory=256Mi --requests=cpu=250m
+body:
+{
+  "metadata": {
+    "resourceVersion": "4711"
+  },
+  "spec": {
+    "template": {
+      "spec": {
+        "containers": [
+          {
+            "name": "web",
+            "resources": {
+              "limits": {
+                "memory": "256Mi"
+              },
+              "requests": {
+                "cpu": "250m"
+              }
+            }
+          }
+        ]
+      }
+    }
+  }
+}

@@ -1,0 +1,51 @@
+name: Bug
+description: Something does not work, or the realm shows something wrong.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: A security problem (a request Kubernites should never send, or a change the user did not order) is reported privately, as SECURITY.md says, not here.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected
+      description: For a wrong drawing, what the cluster really holds (for example the output of kubectl get).
+  - type: textarea
+    id: steps
+    attributes:
+      label: How to make it happen again
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: The version on the title page, or the commit you built.
+    validations:
+      required: true
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system
+      options:
+        - Windows
+        - macOS
+        - Linux
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: cluster
+    attributes:
+      label: The cluster
+      description: Its Kubernetes version and kind (kind, k3s, EKS, GKE, AKS, ...). Leave out names you do not want to share.
+  - type: textarea
+    id: output
+    attributes:
+      label: Output
+      description: What Kubernites printed in the terminal, if anything.
+      render: text

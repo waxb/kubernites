@@ -1,0 +1,18 @@
+PATCH /apis/autoscaling/v2/namespaces/shop/horizontalpodautoscalers/web?fieldManager=kubernites
+verb: retune
+content-type: application/merge-patch+json
+access review: {"verb":"patch","group":"autoscaling","version":"v2","resource":"horizontalpodautoscalers","namespace":"shop","name":"web"}
+classes: []
+preview field: minReplicas spec.minReplicas (was "1")
+preview field: maxReplicas spec.maxReplicas (was "4")
+kubectl: kubectl patch hpa web -n shop -p '{"spec":{"minReplicas":2,"maxReplicas":6}}'
+body:
+{
+  "metadata": {
+    "resourceVersion": "321"
+  },
+  "spec": {
+    "maxReplicas": 6,
+    "minReplicas": 2
+  }
+}

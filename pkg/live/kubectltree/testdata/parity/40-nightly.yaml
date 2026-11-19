@@ -1,0 +1,18 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: nightly
+  namespace: parity
+spec:
+  schedule: "0 3 * * *"
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          restartPolicy: Never
+          terminationGracePeriodSeconds: 1
+          containers:
+          - name: chime
+            image: busybox:1.36
+            imagePullPolicy: Never
+            command: ["sh", "-c", "echo the nightly chime"]

@@ -1,0 +1,21 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: lost
+  namespace: signals
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: lost
+  template:
+    metadata:
+      labels:
+        app: lost
+    spec:
+      terminationGracePeriodSeconds: 1
+      containers:
+      - name: worker
+        image: busybox:0.0-never-published
+        imagePullPolicy: IfNotPresent
+        command: ["sleep", "3600"]

@@ -1,0 +1,16 @@
+PATCH /apis/apps/v1/namespaces/shop/deployments/web/scale?fieldManager=kubernites
+verb: scale
+content-type: application/merge-patch+json
+access review: {"verb":"patch","group":"apps","version":"v1","resource":"deployments","subresource":"scale","namespace":"shop","name":"web"}
+classes: []
+preview field: replicas spec.replicas (was "2")
+kubectl: kubectl scale deployment/web -n shop --replicas=5
+body:
+{
+  "metadata": {
+    "resourceVersion": "4711"
+  },
+  "spec": {
+    "replicas": 5
+  }
+}

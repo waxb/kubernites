@@ -1,0 +1,27 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: web-b
+  namespace: parity
+  labels:
+    app: web-b
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: web-b
+  template:
+    metadata:
+      labels:
+        app: web-b
+    spec:
+      terminationGracePeriodSeconds: 1
+      containers:
+      - name: ticker
+        image: busybox:1.36
+        imagePullPolicy: Never
+        command: ["sh", "-c", "i=0; while true; do echo tick $i; i=$((i+1)); sleep 5; done"]
+        resources:
+          requests:
+            cpu: 5m
+            memory: 8Mi

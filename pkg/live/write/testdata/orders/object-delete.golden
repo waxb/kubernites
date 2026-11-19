@@ -1,0 +1,17 @@
+DELETE /apis/apps/v1/namespaces/shop/deployments/web
+verb: delete
+content-type: application/json
+access review: {"verb":"delete","group":"apps","version":"v1","resource":"deployments","namespace":"shop","name":"web"}
+classes: []
+preview field: deletionTimestamp metadata.deletionTimestamp (was "")
+kubectl: kubectl delete deployment/web -n shop
+body:
+{
+  "apiVersion": "v1",
+  "kind": "DeleteOptions",
+  "preconditions": {
+    "resourceVersion": "4711",
+    "uid": "uid-web"
+  },
+  "propagationPolicy": "Background"
+}

@@ -1,0 +1,24 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: giant
+  namespace: signals
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: giant
+  template:
+    metadata:
+      labels:
+        app: giant
+    spec:
+      terminationGracePeriodSeconds: 1
+      containers:
+      - name: worker
+        image: busybox:1.37
+        imagePullPolicy: IfNotPresent
+        command: ["sleep", "3600"]
+        resources:
+          requests:
+            memory: 64Gi

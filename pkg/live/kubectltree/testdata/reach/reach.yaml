@@ -1,0 +1,73 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: reach
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: shell
+  namespace: reach
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: shell
+  template:
+    metadata:
+      labels:
+        app: shell
+    spec:
+      terminationGracePeriodSeconds: 1
+      containers:
+      - name: main
+        image: busybox:1.36
+        imagePullPolicy: Never
+        command: ["sh", "-c", "mkdir -p /data && echo from-the-hut > /data/greeting.txt && httpd -p 8080 -h /data && exec sleep 3600"]
+        ports:
+        - containerPort: 8080
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: tty-1
+  namespace: reach
+spec:
+  terminationGracePeriodSeconds: 1
+  containers:
+  - name: console
+    image: busybox:1.36
+    imagePullPolicy: Never
+    command: ["sh"]
+    stdin: true
+    tty: true
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: looker
+  namespace: reach
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: looker
+  namespace: reach
+rules:
+- apiGroups: [""]
+  resources: ["pods", "pods/log"]
+  verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: looker
+  namespace: reach
+subjects:
+- kind: ServiceAccount
+  name: looker
+  namespace: reach
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: looker

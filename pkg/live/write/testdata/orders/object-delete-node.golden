@@ -1,0 +1,17 @@
+DELETE /api/v1/nodes/kind-worker
+verb: delete
+content-type: application/json
+access review: {"verb":"delete","version":"v1","resource":"nodes","name":"kind-worker"}
+classes: [destroy]
+preview field: deletionTimestamp metadata.deletionTimestamp (was "")
+kubectl: kubectl delete node/kind-worker
+body:
+{
+  "apiVersion": "v1",
+  "kind": "DeleteOptions",
+  "preconditions": {
+    "resourceVersion": "777",
+    "uid": "uid-node"
+  },
+  "propagationPolicy": "Background"
+}

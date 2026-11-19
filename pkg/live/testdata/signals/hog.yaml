@@ -1,0 +1,24 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: hog
+  namespace: signals
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: hog
+  template:
+    metadata:
+      labels:
+        app: hog
+    spec:
+      terminationGracePeriodSeconds: 1
+      containers:
+      - name: eater
+        image: busybox:1.37
+        imagePullPolicy: IfNotPresent
+        command: ["sh", "-c", "x=aaaaaaaa; while true; do x=$x$x; done"]
+        resources:
+          limits:
+            memory: 24Mi

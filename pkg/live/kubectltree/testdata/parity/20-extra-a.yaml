@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: extra-a
+  namespace: parity
+data:
+  note: to be deleted
