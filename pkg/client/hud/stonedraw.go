@@ -55,6 +55,18 @@ func (h *HUD) StoneKeys(in Input) []Intent {
 	if h.kube != nil {
 		return h.kubectlKeys(in)
 	}
+	if h.stoneHeld {
+		for _, k := range in.Keys {
+			switch k {
+			case ebiten.KeyEnter, ebiten.KeyNumpadEnter:
+				h.stoneHeld = false
+				h.Stone.SetInput("")
+			case ebiten.KeyEscape:
+				h.OverlayID = OverlayNone
+			}
+		}
+		return nil
+	}
 	for _, r := range in.Chars {
 		h.Stone.Insert(r)
 	}
@@ -125,13 +137,16 @@ func (h *HUD) OpenStone(prefill string) {
 	h.OverlayID, h.Stone.away = OverlayStone, false
 	if cmd := strings.TrimPrefix(strings.TrimSpace(prefill), "kubectl "); cmd != "" {
 		h.Stone.SetInput(h.typedInput(cmd))
-		h.Stone.Fresh = true
+		h.Stone.Fresh, h.stoneHeld = true, false
 	}
 }
 
 func (h *HUD) RunStone(cmd string, run bool) bool {
 	cmd = strings.TrimPrefix(strings.TrimSpace(cmd), "kubectl ")
 	h.OverlayID, h.Stone.away = OverlayStone, false
+	if cmd != "" {
+		h.stoneHeld = false
+	}
 	if !run || h.kube != nil || h.backend.Start == nil {
 		h.Stone.SetInput(h.typedInput(cmd))
 		h.Stone.Fresh = true

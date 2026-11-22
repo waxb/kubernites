@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/waxb/kubernites/pkg/client/termview"
 	"github.com/waxb/kubernites/pkg/live"
 	"github.com/waxb/kubernites/pkg/live/kubectltree"
 	"github.com/waxb/kubernites/pkg/live/livetest"
@@ -208,4 +209,81 @@ func holdAll(ctx context.Context, g *write.Gate, server string, h kubectltree.He
 		}
 		return true
 	})
+}
+
+type cannotDraw struct{}
+
+func (cannotDraw) Write([]byte) (int, error) {
+	return 0, termview.ErrCannotDraw
+}
+
+func TestATerminalThatCannotDrawEndsTheSessionAndTheStoneSaysSo(t *testing.T) {
+	tree, _, _ := shellTree(t, write.Seamless, write.Workloads)
+	term := kubectltree.NewTerminal(100, 30, cannotDraw{})
+	job := tree.StartIn("exec -it web-1 -n shop -- sh", nil, term)
+	until(t, "the job ended", job.Done)
+	res := job.Result()
+	if len(res.Sessions) != 1 || res.Sessions[0].Ended != kubectltree.EndedFailed || !strings.Contains(res.Sessions[0].Err, termview.ErrCannotDraw.Error()) {
+		t.Fatalf("the session ended %+v", res.Sessions)
+	}
+	if !strings.Contains(res.Output, termview.ErrCannotDraw.Error()) {
+		t.Fatalf("the Stone did not say why the session ended:\n%s", res.Output)
+	}
+}
+
+func TestTheLeaveChordIsSeenThroughTerminalRepliesAndNeverReachesTheContainer(t *testing.T) {
+	tree, _, shell := shellTree(t, write.Seamless, write.Workloads)
+	out := &screen{}
+	term := kubectltree.NewTerminal(80, 24, out)
+	job := tree.StartIn("exec -it web-1 -n shop -- sh", nil, term)
+	until(t, "the prompt", func() bool { return strings.Contains(out.String(), "$ ") })
+	term.Type([]byte("\x10"))
+	term.Type([]byte("\x1b[3;7R\x1b[?62;22c"))
+	term.Type([]byte("a\x10\x1b[A"))
+	term.Type([]byte("b"))
+	until(t, "the keys reached the shell", func() bool { typed, _, _, _ := shell.Seen(); return strings.HasSuffix(typed, "b") })
+	term.Type([]byte("\x10"))
+	term.Type([]byte("\x1b[1;1R"))
+	term.Type([]byte("\x11after"))
+	until(t, "the job ended", job.Done)
+	typed, _, _, _ := shell.Seen()
+	if want := "\x1b[3;7R\x1b[?62;22c\x10a\x10\x1b[Ab\x1b[1;1R"; typed != want {
+		t.Fatalf("the container got %q, want %q", typed, want)
+	}
+	if s := job.Result().Sessions[0]; s.Ended != kubectltree.EndedLeft {
+		t.Fatalf("the session %+v", s)
+	}
+}
+
+func TestKeysWaitingForAContainerAreCapped(t *testing.T) {
+	term := kubectltree.NewTerminal(80, 24, &screen{})
+	for range 100 {
+		term.Type(bytes.Repeat([]byte("\x1b[6n"), 4096))
+	}
+	if n := kubectltree.Queued(term); n > kubectltree.MaxQueued {
+		t.Fatalf("%d bytes wait for a container that reads nothing", n)
+	}
+}
+
+func TestAKeyIsNeverHeldBackExceptCtrlPWaitingForItsSecondKey(t *testing.T) {
+	for _, c := range []struct {
+		typed []string
+		want  string
+	}{
+		{[]string{"\x1b"}, "\x1b"},
+		{[]string{"i", "\x1b", ":wq\r"}, "i\x1b:wq\r"},
+		{[]string{"\x10"}, ""},
+		{[]string{"\x10", "\x1b"}, "\x10\x1b"},
+		{[]string{"\x10", "\x1b[A"}, "\x10\x1b[A"},
+		{[]string{"\x10", "\x1b[12;40R", "x"}, "\x1b[12;40R\x10x"},
+		{[]string{"\x1bOP", "\x10", "\x1bOP"}, "\x1bOP\x10\x1bOP"},
+	} {
+		term := kubectltree.NewTerminal(80, 24, &screen{})
+		for _, b := range c.typed {
+			term.Type([]byte(b))
+		}
+		if got := kubectltree.QueuedKeys(term); got != c.want {
+			t.Errorf("typed %q: the container gets %q, want %q", c.typed, got, c.want)
+		}
+	}
 }

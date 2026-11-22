@@ -13,7 +13,7 @@ import (
 )
 
 func ReadOnlyConfig(c *rest.Config) *rest.Config {
-	server, _, err := rest.DefaultServerUrlFor(c)
+	server, _, err := write.ServerURL(c)
 	if err != nil {
 		c.Wrap(func(http.RoundTripper) http.RoundTripper {
 			return closedGate{reason: "the cluster's address could not be read: " + err.Error()}
@@ -58,7 +58,7 @@ func openTreeIn(paths []string, name string, connected *rest.Config, gate *write
 	if gate != nil {
 		wrap = gate.WrapConfig
 	}
-	t, err := kubectltree.New(kubectltree.Config{Kubeconfig: paths, Context: name, Wrap: PinnedTo(connected, wrap), Local: local})
+	t, err := kubectltree.New(kubectltree.Config{Kubeconfig: paths, Context: name, Wrap: PinnedTo(connected, wrap), Local: local, Server: connected.Host})
 	if err != nil {
 		return nil
 	}
@@ -70,6 +70,7 @@ func PinnedTo(connected *rest.Config, wrap func(*rest.Config) *rest.Config) func
 	return func(loaded *rest.Config) *rest.Config {
 		c := rest.CopyConfig(pinned)
 		c.UserAgent, c.Timeout, c.DisableCompression = loaded.UserAgent, loaded.Timeout, loaded.DisableCompression
+		c.ContentType, c.AcceptContentTypes = loaded.ContentType, loaded.AcceptContentTypes
 		return wrap(c)
 	}
 }

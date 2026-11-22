@@ -7,13 +7,13 @@ import (
 	"github.com/hajimehoshi/ebiten/v2"
 )
 
-func TestALiveOnlyTitleOffersLiveClusterAndQuitOnly(t *testing.T) {
+func TestALiveOnlyTitleOffersLiveClusterSettingsAndQuit(t *testing.T) {
 	ti := Title{LiveOnly: true, HasSave: true}
 	ids := []string{}
 	for _, b := range ti.Buttons() {
 		ids = append(ids, b.ID)
 	}
-	if !slices.Equal(ids, []string{"title:live", "title:quit"}) {
+	if !slices.Equal(ids, []string{"title:live", TitleSettingsID, "title:quit"}) {
 		t.Fatalf("a live-only title offers %v", ids)
 	}
 	for _, k := range []ebiten.Key{ebiten.KeyN, ebiten.Key1, ebiten.Key2, ebiten.KeyEnter} {

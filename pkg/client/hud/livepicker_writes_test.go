@@ -1,6 +1,7 @@
 package hud
 
 import (
+	"strings"
 	"testing"
 )
 
@@ -123,5 +124,19 @@ func TestReadonlyLocksTheBox(t *testing.T) {
 	p.untick()
 	if p.ChosenLevel() != LevelReadOnly {
 		t.Fatalf("--readonly let the level change to %s", p.ChosenLevel())
+	}
+}
+
+func TestAnotherCertificateAuthorityOrCredentialDropsTheMemoryAndSaysWhat(t *testing.T) {
+	ctx := pickerCtx
+	ctx.Identity = "now"
+	p := confirmPicker(map[string]LiveMemory{ctx.Name: {Server: ctx.Server, User: ctx.User, Identity: "before", Level: LevelSeamless, Warned: LevelSeamless}}, false)
+	p.Contexts[p.Chosen] = ctx
+	intents := intentKinds(p.press(LiveBoxID))
+	if p.Step != LiveStepWrites || !strings.Contains(p.Changed, "credentials") {
+		t.Fatalf("another identity did not warn: %s %q", p.Step, p.Changed)
+	}
+	if it, ok := intents[IntentLiveForget]; !ok || it.Target != ctx.Name {
+		t.Fatalf("the memory was not dropped: %+v", intents)
 	}
 }

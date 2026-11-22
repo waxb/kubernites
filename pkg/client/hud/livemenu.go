@@ -2,6 +2,7 @@ package hud
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/hajimehoshi/ebiten/v2"
@@ -35,14 +36,15 @@ func (h *HUD) SetLiveChoices(list []LiveChoice) {
 	h.lw.choices = list
 }
 
+func (h *HUD) LiveChoices() []LiveChoice {
+	return slices.Clone(h.lw.choices)
+}
+
 func (h *HUD) liveMenu(labels [][3]string) [][3]string {
 	if h.live == nil {
 		return labels
 	}
-	hints := "HINTS: OFF"
-	if h.live.Hints {
-		hints = "HINTS: ON"
-	}
+	hints := hintsLabel(h.live.Hints)
 	out := make([][3]string, 0, len(labels)+2)
 	for _, l := range labels {
 		if liveOnlyMenu[l[0]] || !LiveReadButton(l[0]) {
@@ -58,6 +60,8 @@ func (h *HUD) liveMenu(labels [][3]string) [][3]string {
 	}
 	return out
 }
+
+func hintsLabel(on bool) string { return onOff("HINTS", on, "ON", "OFF") }
 
 func (h *HUD) pressLiveChoices(rest string, f Frame) []Intent {
 	click := Intent{Kind: IntentSound, Command: "click"}

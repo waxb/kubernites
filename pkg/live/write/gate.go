@@ -52,18 +52,20 @@ type Passage struct {
 }
 
 type Gate struct {
-	mu         sync.Mutex
-	context    Context
-	level      Level
-	classes    map[Class]bool
-	tickets    map[string]int
-	stale      func() string
-	observe    []func(Passage)
-	client     *http.Client
-	server     url.URL
-	bound      *rest.Config
-	local      map[string]bool
-	aggregated map[string]bool
+	mu          sync.Mutex
+	context     Context
+	level       Level
+	classes     map[Class]bool
+	tickets     map[string]int
+	stale       func() string
+	observe     []func(Passage)
+	client      *http.Client
+	server      url.URL
+	bound       *rest.Config
+	local       map[string]bool
+	aggregated  map[string]bool
+	unconfirmed bool
+	listed      bool
 }
 
 func New(c Choice) (*Gate, error) {
@@ -116,6 +118,7 @@ func (g *Gate) LearnLocalGroups(ctx context.Context) error {
 		Items []struct {
 			Spec struct {
 				Group   string           `json:"group"`
+				Version string           `json:"version"`
 				Service *json.RawMessage `json:"service"`
 			} `json:"spec"`
 		} `json:"items"`
@@ -125,30 +128,52 @@ func (g *Gate) LearnLocalGroups(ctx context.Context) error {
 	}
 	g.mu.Lock()
 	defer g.mu.Unlock()
-	g.local, g.aggregated = map[string]bool{}, map[string]bool{}
+	g.local, g.aggregated, g.unconfirmed, g.listed = map[string]bool{}, map[string]bool{}, false, true
 	for _, it := range list.Items {
+		gv := it.Spec.Group + "/" + it.Spec.Version
 		if it.Spec.Service != nil && string(*it.Spec.Service) != "null" {
-			g.aggregated[it.Spec.Group] = true
+			g.aggregated[gv] = true
 		} else {
-			g.local[it.Spec.Group] = true
+			g.local[gv] = true
 		}
 	}
 	return nil
 }
 
 func (g *Gate) Previews(r Request) bool {
-	group := parse(r.Path).group
+	t := parse(r.Path)
+	gv := t.group + "/" + t.version
 	g.mu.Lock()
 	defer g.mu.Unlock()
-	return !g.aggregated[group] && (servedGroups[group] || g.local[group])
+	return !g.aggregated[gv] && (servedGroups[t.group] || g.local[gv] && !g.unconfirmed)
 }
 
-func (g *Gate) unpreviewable(group string) string {
+func (g *Gate) previewsNow(ctx context.Context, r Request) bool {
+	builtIn := servedGroups[parse(r.Path).group]
+	g.mu.Lock()
+	listed := g.listed
+	g.mu.Unlock()
+	if builtIn && !listed {
+		return g.Previews(r)
+	}
+	if err := g.LearnLocalGroups(ctx); err != nil {
+		g.mu.Lock()
+		g.unconfirmed, g.listed = true, false
+		g.mu.Unlock()
+		return builtIn && g.Previews(r)
+	}
+	return g.Previews(r)
+}
+
+func (g *Gate) unpreviewable(group, version string) string {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	why := "the " + group + " API group is served by an aggregated API server, which may make a change it is asked only to dry-run"
-	if !g.aggregated[group] {
-		why = "the " + group + " API group is not known to be served by the API server itself (its APIServices could not be read at connect), so its dry run could make the change"
+	if group != "" && version != "" && g.aggregated[group+"/"+version] {
+		why = "version " + version + " of the " + group + " API group is served by an aggregated API server, which may make a change it is asked only to dry-run"
+	}
+	if !g.aggregated[group+"/"+version] {
+		why = "the " + group + " API group is not known to be served by the API server itself (its APIServices could not be read just now), so its dry run could make the change"
 	}
 	return why + "; a change with no preview is never sent at WRITES. DANGEROUSLY SEAMLESS sends it as kubectl does"
 }
@@ -221,7 +246,7 @@ func (g *Gate) WrapConfig(cfg *rest.Config) *rest.Config {
 	out := rest.CopyConfig(cfg)
 	base, ok := "", false
 	var origin *url.URL
-	if u, _, err := rest.DefaultServerUrlFor(out); err == nil {
+	if u, _, err := ServerURL(out); err == nil {
 		base, ok, origin = strings.TrimRight(u.Path, "/"), true, u
 	}
 	other := g.elsewhere(out)
@@ -254,7 +279,7 @@ func (g *Gate) Client(cfg *rest.Config) (*http.Client, error) {
 	g.mu.Unlock()
 	wrapped := g.WrapConfig(cfg)
 	wrapped.UserAgent = UserAgent(g.level)
-	server, _, err := rest.DefaultServerUrlFor(wrapped)
+	server, _, err := ServerURL(wrapped)
 	if err != nil {
 		return nil, err
 	}
@@ -295,6 +320,7 @@ func (t gated) RoundTrip(req *http.Request) (*http.Response, error) {
 		}
 		return nil, err
 	}
+	notePassing(req, seen.kind == kindWrite)
 	resp, err := t.next.RoundTrip(out)
 	t.g.tell(seen, resp, err)
 	return resp, err
@@ -352,7 +378,7 @@ func (g *Gate) admit(req *http.Request, base string, known bool) (*http.Request,
 	if err != nil {
 		return refuse(NotAtLevel, "", err.Error())
 	}
-	r := Request{Method: req.Method, Path: rest, Query: query, Body: body}
+	r := Request{Method: req.Method, Path: rest, Query: query, Body: body, ContentType: req.Header.Get("Content-Type")}
 	upgrade := upgrading(req.Header)
 	k := kindWrite
 	switch {
@@ -367,8 +393,19 @@ func (g *Gate) admit(req *http.Request, base string, known bool) (*http.Request,
 	if t.reaches(upgrade) && !connects {
 		return refuse(NotAtLevel, "", "only the exec, attach, port-forward and proxy of a Pod and the proxy of a Service or Node reach into a workload")
 	}
+	if t.mintsOnDryRun(r) && query.Has("dryRun") {
+		return refuse(NotAtLevel, "", TokenDryRun)
+	}
 	need := withDeclared(classesOf(r, t, upgrade), req.Context())
-	honoured := r.DryRun() && !connects && g.Previews(r)
+	previews := false
+	if !connects {
+		if k == kindWrite && g.level == Writes {
+			previews = g.previewsNow(req.Context(), r)
+		} else {
+			previews = g.Previews(r)
+		}
+	}
+	honoured := r.DryRun() && previews && !t.mintsOnDryRun(r)
 	ticketed := false
 	if k == kindWrite && g.level == Writes && !honoured {
 		g.mu.Lock()
@@ -382,8 +419,8 @@ func (g *Gate) admit(req *http.Request, base string, known bool) (*http.Request,
 		}
 		g.mu.Unlock()
 	}
-	if k == kindWrite && g.level == Writes && !connects && !g.Previews(r) {
-		return refuse(NotAtLevel, "", g.unpreviewable(t.group))
+	if k == kindWrite && g.level == Writes && !connects && !previews {
+		return refuse(NotAtLevel, "", g.unpreviewable(t.group, t.version))
 	}
 	if k == kindWrite {
 		if why := g.Stale(); why != "" {
@@ -400,7 +437,11 @@ func (g *Gate) admit(req *http.Request, base string, known bool) (*http.Request,
 	}
 	if missing != "" && k != kindReview {
 		g.mu.Unlock()
-		return refuse(NeedsClass, missing, "")
+		detail := ""
+		if missing == Tokens {
+			detail = MintsOnDryRun
+		}
+		return refuse(NeedsClass, missing, detail)
 	}
 	if k == kindWrite && honoured {
 		k = kindDryRun

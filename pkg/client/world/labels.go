@@ -101,6 +101,15 @@ func midX(box ui.Rect) int { return box.X + box.W/2 }
 
 func (r *Renderer) settleLabel(box ui.Rect, anchorX int, panels []ui.Rect) (ui.Rect, bool) {
 	got, ok := StackLabel(box, anchorX, panels, r.placed)
+	return r.keepLabel(got, ok)
+}
+
+func (r *Renderer) settleLabelToward(box ui.Rect, anchorX int, panels []ui.Rect, dir int) (ui.Rect, bool) {
+	got, ok := stackToward(box, anchorX, panels, r.placed, dir)
+	return r.keepLabel(got, ok)
+}
+
+func (r *Renderer) keepLabel(got ui.Rect, ok bool) (ui.Rect, bool) {
 	if ok {
 		r.placed = append(r.placed, got)
 		r.note(DrawnLabel, "label", "", got)

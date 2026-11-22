@@ -67,40 +67,25 @@ func (t *Tree) LocalDir() string {
 	return filepath.Join(t.local, "Downloads", "Kubernites")
 }
 
-func (t *Tree) protected(p string) bool {
-	kube := filepath.Join(t.local, ".kube")
-	p = filepath.Clean(p)
-	if p == kube || within(kube, p) {
-		return true
-	}
-	kubeInfo, kubeErr := os.Stat(kube)
-	var configs []os.FileInfo
-	for _, k := range t.paths {
-		if st, err := os.Stat(k); err == nil {
-			configs = append(configs, st)
-		}
-		if filepath.Clean(k) == p {
-			return true
-		}
-	}
-	for cur := p; ; cur = filepath.Dir(cur) {
-		if st, err := os.Stat(cur); err == nil {
-			if kubeErr == nil && os.SameFile(st, kubeInfo) {
-				return true
-			}
-			for _, c := range configs {
-				if os.SameFile(st, c) {
-					return true
-				}
-			}
-		}
-		if filepath.Dir(cur) == cur {
-			return false
-		}
-	}
+func folded(root, p string) bool {
+	root, p = fold(root), fold(p)
+	return p == root || within(root, p)
 }
 
-const ReasonProtected = "the Stone's cp never writes ~/.kube or the kubeconfig chosen at connect"
+func fold(s string) string {
+	return strings.Map(func(r rune) rune {
+		least := r
+		for f := unicode.SimpleFold(r); f != r; f = unicode.SimpleFold(f) {
+			least = min(least, f)
+		}
+		return least
+	}, s)
+}
+
+const (
+	ReasonProtected     = "the Stone's cp never writes ~/.kube, the kubeconfig chosen at connect or a credential file it names"
+	ReasonProtectedRead = "the Stone's cp never sends ~/.kube, the kubeconfig chosen at connect or a credential file it names"
+)
 
 func (s *reach) cpRun(cmd *cobra.Command, args []string) {
 	if len(args) != 2 {
@@ -148,9 +133,16 @@ func (s *reach) cpRun(cmd *cobra.Command, args []string) {
 		return
 	}
 	local := s.tree.LocalPath(src.file)
+	if s.tree.protected(local) {
+		s.run.refuse(ReasonProtectedRead)
+		cmdutil.CheckErr(fmt.Errorf("%s: %s", ReasonProtectedRead, shown(local)))
+	}
 	s.run.localSide(local, false)
-	read, err := s.copyToPod(pod, c.Name, local, dest.file, noPreserve)
+	read, skipped, err := s.copyToPod(pod, c.Name, local, dest.file, noPreserve)
 	s.tellFiles("Read", local, read)
+	for _, p := range skipped {
+		fmt.Fprintf(s.ios.Out, "Skipped %s: %s\n", shown(p), ReasonProtectedRead)
+	}
 	cmdutil.CheckErr(err)
 }
 
@@ -224,9 +216,9 @@ func (s *reach) copyFromPod(pod *corev1.Pod, container, remote, local string) ([
 	return written, err
 }
 
-func (s *reach) copyToPod(pod *corev1.Pod, container, local, remote string, noPreserve bool) ([]string, error) {
+func (s *reach) copyToPod(pod *corev1.Pod, container, local, remote string, noPreserve bool) ([]string, []string, error) {
 	if _, err := os.Lstat(local); err != nil {
-		return nil, fmt.Errorf("%s doesn't exist in local filesystem", local)
+		return nil, nil, fmt.Errorf("%s doesn't exist in local filesystem", local)
 	}
 	destFile := path.Clean(remote)
 	if s.podExec(pod, container, []string{"test", "-d", remote}, nil, io.Discard) == nil {
@@ -240,11 +232,11 @@ func (s *reach) copyToPod(pod *corev1.Pod, container, local, remote string, noPr
 		cmdArr = append(cmdArr, "-C", dir)
 	}
 	reader, writer := io.Pipe()
-	var read []string
+	var read, skipped []string
 	tarred := make(chan error, 1)
 	go func() {
-		files, err := makeTar(local, path.Base(destFile), writer)
-		read = files
+		files, passed, err := makeTar(local, path.Base(destFile), writer, s.tree.protected)
+		read, skipped = files, passed
 		writer.CloseWithError(err)
 		tarred <- err
 	}()
@@ -253,37 +245,47 @@ func (s *reach) copyToPod(pod *corev1.Pod, container, local, remote string, noPr
 	if tarErr := <-tarred; err == nil && tarErr != nil && !errors.Is(tarErr, io.ErrClosedPipe) {
 		err = tarErr
 	}
-	return read, err
+	return read, skipped, err
 }
 
-func makeTar(local, destName string, w io.Writer) ([]string, error) {
-	tw := tar.NewWriter(w)
-	var read []string
+type tarWalk struct {
+	tw      *tar.Writer
+	read    []string
+	skipped []string
+	skip    func(string) bool
+}
+
+func makeTar(local, destName string, w io.Writer, skip func(string) bool) ([]string, []string, error) {
+	tw := &tarWalk{tw: tar.NewWriter(w), skip: skip}
 	src := filepath.Clean(local)
 	matches := []string{src}
 	if _, err := os.Lstat(src); err != nil {
 		globbed, err := filepath.Glob(src)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		matches = globbed
 	}
 	if len(matches) == 0 {
-		return nil, fmt.Errorf("%s doesn't exist in local filesystem", local)
+		return nil, nil, fmt.Errorf("%s doesn't exist in local filesystem", local)
 	}
 	for _, m := range matches {
 		name := destName
 		if m != src {
 			name = path.Join(destName, filepath.Base(m))
 		}
-		if err := tarPath(m, name, tw, &read); err != nil {
-			return read, err
+		if err := tw.add(m, name); err != nil {
+			return tw.read, tw.skipped, err
 		}
 	}
-	return read, tw.Close()
+	return tw.read, tw.skipped, tw.tw.Close()
 }
 
-func tarPath(file, name string, tw *tar.Writer, read *[]string) error {
+func (w *tarWalk) add(file, name string) error {
+	if w.skip != nil && w.skip(file) {
+		w.skipped = append(w.skipped, file)
+		return nil
+	}
 	stat, err := os.Lstat(file)
 	if err != nil {
 		return err
@@ -297,10 +299,10 @@ func tarPath(file, name string, tw *tar.Writer, read *[]string) error {
 		if len(entries) == 0 {
 			hdr, _ := tar.FileInfoHeader(stat, file)
 			hdr.Name = name
-			return tw.WriteHeader(hdr)
+			return w.tw.WriteHeader(hdr)
 		}
 		for _, e := range entries {
-			if err := tarPath(filepath.Join(file, e.Name()), path.Join(name, e.Name()), tw, read); err != nil {
+			if err := w.add(filepath.Join(file, e.Name()), path.Join(name, e.Name())); err != nil {
 				return err
 			}
 		}
@@ -312,7 +314,7 @@ func tarPath(file, name string, tw *tar.Writer, read *[]string) error {
 		}
 		hdr, _ := tar.FileInfoHeader(stat, target)
 		hdr.Name, hdr.Linkname = name, target
-		return tw.WriteHeader(hdr)
+		return w.tw.WriteHeader(hdr)
 	case !stat.Mode().IsRegular():
 		return nil
 	}
@@ -321,7 +323,7 @@ func tarPath(file, name string, tw *tar.Writer, read *[]string) error {
 		return err
 	}
 	hdr.Name = name
-	if err := tw.WriteHeader(hdr); err != nil {
+	if err := w.tw.WriteHeader(hdr); err != nil {
 		return err
 	}
 	f, err := os.Open(file)
@@ -329,10 +331,10 @@ func tarPath(file, name string, tw *tar.Writer, read *[]string) error {
 		return err
 	}
 	defer f.Close()
-	if _, err := io.Copy(tw, f); err != nil {
+	if _, err := io.Copy(w.tw, f); err != nil {
 		return err
 	}
-	*read = append(*read, file)
+	w.read = append(w.read, file)
 	return f.Close()
 }
 
@@ -380,79 +382,221 @@ func throughLink(root, p string) bool {
 	return false
 }
 
+const ReasonCopyEnded = "the copy stopped where it was answered N; what was written stays"
+
+var (
+	copyAskBytes  int64 = 1 << 30
+	copyAskFiles        = 10000
+	copyShowBytes int64 = 64 << 20
+	copyShowFiles       = 1000
+)
+
+type copied struct {
+	s         *reach
+	dest      string
+	bytes     int64
+	files     int
+	askBytes  int64
+	askFiles  int
+	showBytes int64
+	showFiles int
+}
+
+func (c *copied) more(n int64, file bool) error {
+	c.bytes += n
+	if file {
+		c.files++
+	}
+	if c.bytes >= c.showBytes || c.files >= c.showFiles {
+		fmt.Fprintf(c.s.ios.ErrOut, "Copying: %s in %s so far\n", size(c.bytes), files(c.files))
+		for c.bytes >= c.showBytes {
+			c.showBytes += copyShowBytes
+		}
+		for c.files >= c.showFiles {
+			c.showFiles += copyShowFiles
+		}
+	}
+	if c.bytes < c.askBytes && c.files < c.askFiles {
+		return nil
+	}
+	if !c.s.run.ask(c.s.ctx, Held{More: size(c.bytes) + " in " + files(c.files)}) {
+		return errors.New(ReasonCopyEnded)
+	}
+	for c.bytes >= c.askBytes {
+		c.askBytes += copyAskBytes
+	}
+	for c.files >= c.askFiles {
+		c.askFiles += copyAskFiles
+	}
+	return nil
+}
+
+func (c *copied) write(out io.Writer, r io.Reader) error {
+	for {
+		step := min(c.askBytes-c.bytes, c.showBytes-c.bytes, 1<<20)
+		n, err := io.CopyN(out, r, max(step, 1))
+		if n > 0 {
+			if merr := c.more(n, false); merr != nil {
+				return merr
+			}
+		}
+		if errors.Is(err, io.EOF) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+	}
+}
+
+func files(n int) string {
+	if n == 1 {
+		return "1 entry"
+	}
+	return fmt.Sprintf("%d entries", n)
+}
+
+func size(n int64) string {
+	switch {
+	case n >= 1<<30:
+		return fmt.Sprintf("%.1f GiB", float64(n)/(1<<30))
+	case n >= 1<<20:
+		return fmt.Sprintf("%.1f MiB", float64(n)/(1<<20))
+	case n >= 1<<10:
+		return fmt.Sprintf("%.1f KiB", float64(n)/(1<<10))
+	}
+	return fmt.Sprintf("%d bytes", n)
+}
+
+type madeSet struct {
+	list []string
+	seen map[string]bool
+}
+
+func (m *madeSet) add(p string) {
+	if !m.seen[p] {
+		m.seen[p] = true
+		m.list = append(m.list, p)
+	}
+}
+
+func (m *madeSet) drop(p string) {
+	if m.seen[p] {
+		delete(m.seen, p)
+		m.list = slices.DeleteFunc(m.list, func(q string) bool { return q == p })
+	}
+}
+
 func (s *reach) untarAll(prefix, dest string, r io.Reader) ([]string, error) {
-	var written []string
+	written := &madeSet{seen: map[string]bool{}}
 	overwrite := 0
+	count := &copied{s: s, dest: dest, askBytes: copyAskBytes, askFiles: copyAskFiles, showBytes: copyShowBytes, showFiles: copyShowFiles}
 	tr := tar.NewReader(r)
 	dest = filepath.Clean(dest)
 	for {
 		hdr, err := tr.Next()
 		if errors.Is(err, io.EOF) {
-			return written, nil
+			return written.list, nil
 		}
 		if err != nil {
-			return written, err
+			return written.list, err
 		}
 		if !strings.HasPrefix(hdr.Name, prefix) {
-			return written, errors.New("tar contents corrupted")
+			return written.list, errors.New("tar contents corrupted")
 		}
-		target := filepath.Join(dest, filepath.FromSlash(hdr.Name[len(prefix):]))
-		if !within(dest, target) && target != dest {
-			fmt.Fprintf(s.ios.ErrOut, "warning: file %q is outside target destination, skipping\n", target)
-			continue
+		if err := s.untarOne(hdr, tr, prefix, dest, written, &overwrite, count); err != nil {
+			return written.list, err
 		}
-		if throughLink(dest, target) {
-			fmt.Fprintf(s.ios.ErrOut, "warning: %q would be written through a link, skipping\n", target)
-			continue
-		}
-		if s.tree.protected(target) {
-			fmt.Fprintf(s.ios.ErrOut, "warning: %q is ~/.kube or the kubeconfig chosen at connect, skipping\n", target)
-			continue
-		}
-		switch hdr.Typeflag {
-		case tar.TypeDir:
-			if err := s.makeDirs(target, &written); err != nil {
-				return written, err
-			}
-			continue
-		case tar.TypeSymlink:
-			fmt.Fprintf(s.ios.ErrOut, "warning: skipping symlink: %q -> %q\n", target, hdr.Linkname)
-			continue
-		case tar.TypeReg:
-		default:
-			fmt.Fprintf(s.ios.ErrOut, "warning: skipping %q: not a regular file\n", target)
-			continue
-		}
-		if _, err := os.Lstat(target); err == nil {
-			if overwrite == 0 {
-				overwrite = -1
-				if s.run.ask(s.ctx, Held{Overwrite: target}) {
-					overwrite = 1
-				}
-			}
-			if overwrite < 0 {
-				fmt.Fprintf(s.ios.ErrOut, "Kept %s: it already exists on this computer\n", target)
-				continue
-			}
-		}
-		if err := s.makeDirs(filepath.Dir(target), &written); err != nil {
-			return written, err
-		}
-		if !slices.Contains(written, target) {
-			written = append(written, target)
-		}
-		out, err := os.OpenFile(target, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644)
-		if err != nil {
-			return written, err
-		}
-		_, cerr := io.Copy(out, tr)
-		if err := errors.Join(cerr, out.Close()); err != nil {
-			return written, err
+		if err := count.more(0, true); err != nil {
+			return written.list, err
 		}
 	}
 }
 
-func (s *reach) makeDirs(dir string, written *[]string) error {
+func (s *reach) untarOne(hdr *tar.Header, tr io.Reader, prefix, dest string, written *madeSet, overwrite *int, count *copied) error {
+	target := filepath.Join(dest, filepath.FromSlash(hdr.Name[len(prefix):]))
+	if !within(dest, target) && target != dest {
+		fmt.Fprintf(s.ios.ErrOut, "warning: file %q is outside target destination, skipping\n", target)
+		return nil
+	}
+	if throughLink(dest, target) {
+		fmt.Fprintf(s.ios.ErrOut, "warning: %q would be written through a link, skipping\n", target)
+		return nil
+	}
+	if s.tree.protected(target) {
+		fmt.Fprintf(s.ios.ErrOut, "warning: %q is ~/.kube, the kubeconfig chosen at connect or a credential file it names, skipping\n", target)
+		return nil
+	}
+	switch hdr.Typeflag {
+	case tar.TypeDir:
+		if err := s.makeDirs(target, written); err != nil {
+			return err
+		}
+		if s.tree.protected(target) {
+			s.unmake(target, written)
+			fmt.Fprintf(s.ios.ErrOut, "warning: %s is ~/.kube, the kubeconfig chosen at connect or a credential file it names, skipping\n", shown(target))
+		}
+		return nil
+	case tar.TypeSymlink:
+		fmt.Fprintf(s.ios.ErrOut, "warning: skipping symlink: %q -> %q\n", target, hdr.Linkname)
+		return nil
+	case tar.TypeReg:
+	default:
+		fmt.Fprintf(s.ios.ErrOut, "warning: skipping %q: not a regular file\n", target)
+		return nil
+	}
+	exists := false
+	if _, err := os.Lstat(target); err == nil {
+		exists = true
+		if *overwrite == 0 {
+			*overwrite = -1
+			if s.run.ask(s.ctx, Held{Overwrite: shown(target)}) {
+				*overwrite = 1
+			}
+		}
+		if *overwrite < 0 {
+			fmt.Fprintf(s.ios.ErrOut, "Kept %s: it already exists on this computer\n", shown(target))
+			return nil
+		}
+	}
+	if err := s.makeDirs(filepath.Dir(target), written); err != nil {
+		return err
+	}
+	if s.tree.protected(target) {
+		s.unmake(filepath.Dir(target), written)
+		fmt.Fprintf(s.ios.ErrOut, "warning: %s is ~/.kube, the kubeconfig chosen at connect or a credential file it names, skipping\n", shown(target))
+		return nil
+	}
+	if exists {
+		if err := os.Remove(target); err != nil {
+			return err
+		}
+	}
+	out, err := os.OpenFile(target, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
+	if err != nil {
+		return err
+	}
+	written.add(target)
+	if err := errors.Join(count.write(out, tr), out.Close()); err != nil {
+		written.drop(target)
+		os.Remove(target)
+		fmt.Fprintf(s.ios.ErrOut, "Not copied: %s, cut short while it was written; the part written was removed\n", shown(target))
+		return err
+	}
+	return nil
+}
+
+func (s *reach) unmake(dir string, written *madeSet) {
+	for cur := filepath.Clean(dir); ; cur = filepath.Dir(cur) {
+		d := cur + string(filepath.Separator)
+		if !written.seen[d] || os.Remove(cur) != nil {
+			return
+		}
+		written.drop(d)
+	}
+}
+
+func (s *reach) makeDirs(dir string, written *madeSet) error {
 	var made []string
 	for cur := filepath.Clean(dir); ; cur = filepath.Dir(cur) {
 		if _, err := os.Lstat(cur); err == nil || filepath.Dir(cur) == cur {
@@ -464,9 +608,7 @@ func (s *reach) makeDirs(dir string, written *[]string) error {
 		return err
 	}
 	for i := len(made) - 1; i >= 0; i-- {
-		if d := made[i] + string(filepath.Separator); !slices.Contains(*written, d) {
-			*written = append(*written, d)
-		}
+		written.add(made[i] + string(filepath.Separator))
 	}
 	return nil
 }

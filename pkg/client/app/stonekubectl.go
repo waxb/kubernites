@@ -46,11 +46,15 @@ func (s *Session) treeBackend(b hud.Backend) hud.Backend {
 	b.Send = func(e hud.LiveEdit, text string, force bool) (hud.StoneJob, bool) {
 		return s.stoneJob(scriptoriumOrder(e, force)).send(t, e, text, force), true
 	}
-	b.Reveal = func(e hud.LiveEdit, key string) (string, bool) {
-		ctx, cancel := context.WithTimeout(context.Background(), revealTimeout)
-		defer cancel()
-		v, err := t.Tree().Reveal(ctx, e.Namespace, e.Name, key)
-		return v, err == nil
+	b.Reveal = func(e hud.LiveEdit, key string) <-chan hud.Revealed {
+		out := make(chan hud.Revealed, 1)
+		go func() {
+			ctx, cancel := context.WithTimeout(context.Background(), revealTimeout)
+			defer cancel()
+			v, err := t.Tree().Reveal(ctx, e.Namespace, e.Name, key)
+			out <- hud.Revealed{Value: v, OK: err == nil}
+		}()
+		return out
 	}
 	return b
 }
@@ -63,18 +67,21 @@ type answerTo struct {
 }
 
 type treeJob struct {
-	job     *kubectltree.Job
-	screen  *stoneScreen
-	asking  sync.Mutex
-	mu      sync.Mutex
-	ask     *hud.StoneAsk
-	asked   int
-	reply   chan answerTo
-	fail    *hud.StoneEnd
-	order   string
-	record  func(order string, w kubectltree.Write)
-	session func(order string, s kubectltree.Session)
-	passed  func(write.Class)
+	job        *kubectltree.Job
+	screen     *stoneScreen
+	asking     sync.Mutex
+	mu         sync.Mutex
+	ask        *hud.StoneAsk
+	asked      int
+	reply      chan answerTo
+	fail       *hud.StoneEnd
+	order      string
+	record     func(order string, w kubectltree.Write)
+	session    func(order string, s kubectltree.Session)
+	passed     func(write.Class)
+	prep       chan struct{}
+	cancelPrep context.CancelFunc
+	stopped    bool
 }
 
 func newTreeJob() *treeJob {
@@ -127,21 +134,55 @@ func SendTree(t treeRealm, e hud.LiveEdit, text string, force bool) hud.StoneJob
 }
 
 func (j *treeJob) send(t treeRealm, e hud.LiveEdit, text string, force bool) *treeJob {
-	if len(maskedKeys(e.Kind, text)) > 0 {
-		restored, err := unmask(t, e, text)
+	if len(maskedKeys(e.Kind, text)) == 0 {
+		j.job = t.Tree().StartApply(text, force, j.hold(t))
+		return j
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	prep := make(chan struct{})
+	j.mu.Lock()
+	j.prep, j.cancelPrep = prep, cancel
+	j.mu.Unlock()
+	go func() {
+		defer close(prep)
+		defer cancel()
+		restored, err := unmaskSend(ctx, t, e, text)
+		j.mu.Lock()
+		defer j.mu.Unlock()
+		if j.stopped {
+			j.fail = &hud.StoneEnd{Stopped: true, Sent: hud.StoneEditEnd{Output: ui.Bridge("STOP ended the send before it was sent: nothing was sent.", "Stopped before the apply: nothing was sent.")}}
+			return
+		}
 		if err != nil {
 			j.fail = &hud.StoneEnd{Sent: hud.StoneEditEnd{Output: ui.Bridge("A hidden value could not be read again, so nothing was sent: ", "A masked value could not be read again, so nothing was sent: ") + err.Error()}}
-			return j
+			return
 		}
-		text = restored
-	}
-	j.job = t.Tree().StartApply(text, force, j.hold(t))
+		j.job = t.Tree().StartApply(restored, force, j.hold(t))
+	}()
 	return j
 }
 
-func unmask(t treeRealm, e hud.LiveEdit, text string) (string, error) {
+func (j *treeJob) current() (*kubectltree.Job, *hud.StoneEnd, bool) {
+	j.mu.Lock()
+	prep := j.prep
+	j.mu.Unlock()
+	if prep != nil {
+		select {
+		case <-prep:
+		default:
+			return nil, nil, false
+		}
+	}
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	return j.job, j.fail, true
+}
+
+var unmaskSend = unmask
+
+func unmask(parent context.Context, t treeRealm, e hud.LiveEdit, text string) (string, error) {
 	for _, key := range maskedKeys(e.Kind, text) {
-		ctx, cancel := context.WithTimeout(context.Background(), revealTimeout)
+		ctx, cancel := context.WithTimeout(parent, revealTimeout)
 		v, err := t.Tree().Reveal(ctx, e.Namespace, e.Name, key)
 		cancel()
 		if err != nil {
@@ -197,12 +238,16 @@ func (j *treeJob) wait(ctx context.Context, a live.StoneAsk) bool {
 }
 
 func (j *treeJob) Take() ([]hud.StoneChunk, bool) {
-	if j.job == nil {
+	job, _, ready := j.current()
+	if !ready {
+		return nil, false
+	}
+	if job == nil {
 		return nil, true
 	}
-	chunks, done := j.job.Take()
+	chunks, done := job.Take()
 	if j.record != nil {
-		for _, w := range j.job.TakeWrites() {
+		for _, w := range job.TakeWrites() {
 			j.record(j.order, w)
 		}
 	}
@@ -239,16 +284,27 @@ func (j *treeJob) Answer(yes bool) {
 
 func (j *treeJob) Stop() {
 	j.Answer(false)
-	if j.job != nil {
-		j.job.Stop()
+	j.mu.Lock()
+	j.stopped = true
+	cancel, job := j.cancelPrep, j.job
+	j.mu.Unlock()
+	if cancel != nil {
+		cancel()
+	}
+	if job != nil {
+		job.Stop()
 	}
 }
 
 func (j *treeJob) End() hud.StoneEnd {
-	if j.fail != nil {
-		return *j.fail
+	job, fail, _ := j.current()
+	if fail != nil {
+		return *fail
 	}
-	res := j.job.Result()
+	if job == nil {
+		return hud.StoneEnd{}
+	}
+	res := job.Result()
 	if j.screen != nil {
 		j.screen.close()
 	}
@@ -262,7 +318,7 @@ func (j *treeJob) End() hud.StoneEnd {
 	if e := res.Edit; e != nil {
 		end.Edit = &hud.LiveEdit{Ref: e.Ref(), Kind: e.Kind, Namespace: e.Namespace, Name: e.Name, Format: e.Format, Text: e.Text, Hidden: maskedKeys(e.Kind, e.Text)}
 	}
-	if a, ok := j.job.Applied(); ok {
+	if a, ok := job.Applied(); ok {
 		end.Sent = hud.StoneEditEnd{OK: a.OK(), Output: strings.TrimSpace(a.Output), Stale: a.Stale, Refused: strings.Contains(a.Output, live.ErrReadOnly.Error())}
 		for _, c := range a.Conflicts {
 			manager := c.Manager
@@ -300,6 +356,12 @@ func maskedKeys(kind, text string) []string {
 const maxAskBody = 240
 
 func RenderAsk(a live.StoneAsk) hud.StoneAsk {
+	if a.More != "" {
+		return hud.StoneAsk{Title: "KEEP COPYING ONTO THIS COMPUTER?", Lines: []string{
+			"This copy has written " + a.More + " under " + a.Local + ".",
+			"Y copies on and asks again at the next 1 GiB or 10,000 entries; N stops here and keeps what was written whole.",
+		}, Confirm: true, Go: "COPY ON [Y]", GoTip: "Copy on; the Stone asks again at the next 1 GiB or 10,000 entries"}
+	}
 	if a.Overwrite != "" {
 		return hud.StoneAsk{Title: "OVERWRITE A FILE ON THIS COMPUTER?", Lines: []string{
 			a.Overwrite + " already exists on this computer.",
@@ -307,7 +369,11 @@ func RenderAsk(a live.StoneAsk) hud.StoneAsk {
 		}, Confirm: true, Go: "OVERWRITE [Y]", GoTip: "Replace the files this copy finds already on this computer"}
 	}
 	if a.Why == write.NeedsClass {
-		lines := append(classText(a.Class), ui.Bridge("Passed once, it is remembered for this realm until RESET LIVE CHOICES.", "Passed once, it is remembered for this context until RESET LIVE CHOICES."))
+		text := classText(a.Class)
+		if a.Class == write.Tokens {
+			text = []string{tokenWarning(a.Level)}
+		}
+		lines := append(text, ui.Bridge("Passed once, it is remembered for this realm until RESET LIVE CHOICES.", "Passed once, it is remembered for this context until RESET LIVE CHOICES."))
 		return hud.StoneAsk{Title: "! " + strings.ToUpper(classTitle(a.Class)) + " !", Lines: lines, Confirm: true, Go: "I UNDERSTAND [Y]", GoTip: "Pass this warning once for this context; it is remembered until RESET LIVE CHOICES"}
 	}
 	if a.Connect {
@@ -321,6 +387,17 @@ func RenderAsk(a live.StoneAsk) hud.StoneAsk {
 	body := write.BodyShown(r.Path, a.Order.ContentType, r.Body)
 	if len(body) > maxAskBody {
 		body = body[:maxAskBody] + "..."
+	}
+	if a.Unpreviewed {
+		lines := []string{ui.Bridge("No preview: the Chancery makes this token even when asked only for a preview.", "Request: "+r.Method+" "+path)}
+		if !ui.Naming() {
+			lines = append(lines, "Change: "+storyChange(r))
+		}
+		if !ui.StoryNaming() && body != "" {
+			lines = append(lines, "Body: "+body)
+		}
+		lines = append(lines, mintsText())
+		return hud.StoneAsk{Title: ui.Bridge("CONFIRM: make a writ's token?", "CONFIRM: "+a.Command), Lines: lines, Confirm: true}
 	}
 	verdict := "Dry run (dryRun=All): " + a.Preview.Text()
 	if a.Preview.OK() {
@@ -338,6 +415,20 @@ func RenderAsk(a live.StoneAsk) hud.StoneAsk {
 		lines = append(lines, ui.Bridge("Nothing can be sent: the Chancery refused the preview.", "Nothing can be sent: the dry run failed."))
 	}
 	return hud.StoneAsk{Title: ui.Bridge("CONFIRM: send this change to the realm?", "CONFIRM: "+a.Command), Lines: lines, Confirm: a.Preview.OK()}
+}
+
+func tokenWarning(level write.Level) string {
+	if level == write.Seamless {
+		return ui.Bridge("Asking for a writ's token makes a real token that opens doors until it expires, and there is no preview: the Chancery makes it even when asked only for a preview. Y makes it now; no CONFIRM follows at this level.",
+			"A ServiceAccount token request (kubectl create token) mints a real token, valid until it expires, and has no preview: the API server mints it even for a dry run. Y mints it now; at DANGEROUSLY SEAMLESS no CONFIRM follows.")
+	}
+	return ui.Bridge("Asking for a writ's token makes a real token that opens doors until it expires, and there is no preview: the Chancery makes it even when asked only for a preview. After this warning a CONFIRM asks, and its Y makes the token.",
+		"A ServiceAccount token request (kubectl create token) mints a real token, valid until it expires, and has no preview: the API server mints it even for a dry run. After this warning a CONFIRM asks, and its Y mints the token.")
+}
+
+func mintsText() string {
+	return ui.Bridge("Asking for a writ's token makes a real token at once: the Chancery makes it even for a preview, so there is none. Y makes it; it opens doors until it expires.",
+		"A ServiceAccount token request (kubectl create token) has no preview: the API server mints a real token even for a dry run. CONFIRM mints it, and it is valid until it expires.")
 }
 
 func storyChange(r write.Request) string {
@@ -453,10 +544,11 @@ func storyVerdict(a write.Answer) string {
 
 func (g *Game) toggleStone() {
 	if g.Sess == nil {
-		return
+		g.Settings.Stone = hud.NextStoneMode(g.stoneKubectl())
+	} else {
+		g.Settings.Stone = hud.NextStoneMode(g.Sess.Hud.StoneKubectl())
+		g.Sess.Hud.SetStoneMode(g.Settings.Stone)
 	}
-	g.Settings.Stone = hud.NextStoneMode(g.Sess.Hud.StoneKubectl())
-	g.Sess.Hud.SetStoneMode(g.Settings.Stone)
 	if err := SaveSettings(g.SettingsPath(), g.Settings); err != nil {
 		g.Log.Warn("could not save settings", "err", err)
 	}

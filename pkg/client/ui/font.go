@@ -255,8 +255,34 @@ func wrapParagraph(paragraph string, maxChars int) []string {
 	return out
 }
 
+func flagWithValue(words []string, maxChars int) []string {
+	out := make([]string, 0, len(words))
+	for i := 0; i < len(words); i++ {
+		if i+1 < len(words) && isFlag(words[i]) && !strings.HasPrefix(words[i+1], "-") && cells(words[i]+" "+words[i+1]) <= maxChars {
+			out = append(out, words[i]+" "+words[i+1])
+			i++
+			continue
+		}
+		out = append(out, words[i])
+	}
+	return out
+}
+
+func isFlag(word string) bool {
+	name := strings.TrimPrefix(strings.TrimPrefix(word, "-"), "-")
+	if len(name) == len(word) || name == "" || !unicode.IsLetter(rune(name[0])) {
+		return false
+	}
+	for _, r := range name {
+		if !unicode.IsLetter(r) && !unicode.IsDigit(r) && r != '-' {
+			return false
+		}
+	}
+	return true
+}
+
 func wrapWords(paragraph string, maxChars int) []string {
-	words := strings.Fields(paragraph)
+	words := flagWithValue(strings.Fields(paragraph), maxChars)
 	if len(words) == 0 {
 		return []string{""}
 	}

@@ -14,8 +14,12 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/cli-runtime/pkg/genericiooptions"
+	clientforward "k8s.io/client-go/tools/portforward"
 	"k8s.io/kubectl/pkg/cmd/portforward"
 	cmdutil "k8s.io/kubectl/pkg/cmd/util"
+
+	forwarddial "github.com/waxb/kubernites/pkg/live/forwarding"
+	"github.com/waxb/kubernites/pkg/live/write"
 )
 
 const ForwardAddress = "127.0.0.1"
@@ -39,6 +43,36 @@ type forwarding struct {
 	done  chan struct{}
 	once  sync.Once
 	abort func()
+	ports io.Closer
+	conns io.Closer
+	gone  bool
+}
+
+func (f *forwarding) closeListeners() {
+	f.mu.Lock()
+	ports := f.ports
+	f.mu.Unlock()
+	if ports != nil {
+		ports.Close()
+	}
+}
+
+func (f *forwarding) closeConnections() {
+	f.mu.Lock()
+	conns := f.conns
+	f.mu.Unlock()
+	if conns != nil {
+		conns.Close()
+	}
+}
+
+type portsCloser struct {
+	pf *clientforward.PortForwarder
+}
+
+func (c portsCloser) Close() error {
+	c.pf.Close()
+	return nil
 }
 
 func (f *forwarding) snapshot() Forward {
@@ -99,15 +133,21 @@ func (t *Tree) StopForward(id int) bool {
 	if target == nil {
 		return false
 	}
-	target.halt(EndedLeft)
-	if len(target.snapshot().Listening) == 0 {
-		if target.abort != nil {
-			target.abort()
-		}
-		return true
-	}
-	<-target.done
+	t.letGo(target, EndedLeft)
 	return true
+}
+
+func (t *Tree) letGo(f *forwarding, how Ended) {
+	listening := len(f.snapshot().Listening) > 0
+	if listening {
+		f.closeListeners()
+	}
+	f.halt(how)
+	f.closeConnections()
+	if !listening && f.abort != nil {
+		f.abort()
+	}
+	t.release(f, nil)
 }
 
 func (t *Tree) stopForwards() {
@@ -115,8 +155,7 @@ func (t *Tree) stopForwards() {
 	open := slices.Clone(t.fw.open)
 	t.fw.mu.Unlock()
 	for _, f := range open {
-		f.halt(EndedClosed)
-		<-f.done
+		t.letGo(f, EndedClosed)
 	}
 }
 
@@ -131,20 +170,29 @@ func (t *Tree) addForward(info Forward) *forwarding {
 }
 
 func (t *Tree) endForward(f *forwarding, err error) {
+	t.release(f, err)
+	close(f.done)
+}
+
+func (t *Tree) release(f *forwarding, err error) {
 	f.mu.Lock()
+	if f.gone {
+		f.mu.Unlock()
+		return
+	}
+	f.gone = true
 	switch {
 	case f.info.Ended != "":
 	case err == nil:
 		f.info.Ended = EndedExited
 	default:
-		f.info.Ended, f.info.Err = EndedFailed, err.Error()
+		f.info.Ended, f.info.Err = EndedFailed, write.Redact(err.Error())
 	}
 	f.mu.Unlock()
 	t.fw.mu.Lock()
 	t.fw.open = slices.DeleteFunc(t.fw.open, func(o *forwarding) bool { return o == f })
 	t.fw.ended = append(t.fw.ended, f.snapshot())
 	t.fw.mu.Unlock()
-	close(f.done)
 }
 
 var forwardingFrom = regexp.MustCompile(`^Forwarding from (\S+) -> (\d+)`)
@@ -196,7 +244,6 @@ func (s *reach) forwardRun(cmd *cobra.Command, args []string) {
 	out := &forwardOut{stone: s.ios.Out}
 	errOut := &forwardOut{stone: s.ios.ErrOut}
 	o := portforward.NewDefaultPortForwardOptions(genericiooptions.IOStreams{In: s.ios.In, Out: out, ErrOut: errOut})
-	forward := o.PortForwarder.ForwardPorts
 	cmdutil.CheckErr(o.Complete(s.f, cmd, args))
 	o.Address = []string{ForwardAddress}
 	cmdutil.CheckErr(o.Validate())
@@ -226,8 +273,18 @@ func (s *reach) forwardRun(cmd *cobra.Command, args []string) {
 	ended := make(chan error, 1)
 	session := &Session{Verb: "port-forward", Channel: "portforward", Namespace: o.Namespace, Pod: pod.Name}
 	s.run.opened(session)
+	dialer, held, err := forwarddial.Dialer("POST", u, o.Config, !cmdutil.PortForwardWebsockets.IsDisabled())
+	cmdutil.CheckErr(err)
+	registered.mu.Lock()
+	registered.conns = held
+	registered.mu.Unlock()
+	pf, err := clientforward.NewOnAddressesForStreaming(dialer, o.Address, o.Ports, registered.stop, o.ReadyChannel, out, errOut)
+	cmdutil.CheckErr(err)
+	registered.mu.Lock()
+	registered.ports = portsCloser{pf: pf}
+	registered.mu.Unlock()
 	go func() {
-		err := forward("POST", u, *o)
+		err := pf.ForwardPorts()
 		out.detach()
 		errOut.detach()
 		t.endForward(registered, err)
@@ -242,12 +299,11 @@ func (s *reach) forwardRun(cmd *cobra.Command, args []string) {
 	case err := <-ended:
 		session.Ended = EndedFailed
 		if err != nil {
-			session.Err = err.Error()
+			session.Err = write.Redact(err.Error())
 		}
 		cmdutil.CheckErr(err)
 	case <-s.ctx.Done():
-		registered.halt(EndedClosed)
-		<-registered.done
+		t.letGo(registered, EndedClosed)
 		session.Ended = EndedClosed
 	}
 }

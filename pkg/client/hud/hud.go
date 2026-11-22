@@ -44,7 +44,12 @@ type Backend struct {
 	Apply   func(yaml string) (string, bool)
 	Start   func(command string) (StoneJob, bool)
 	Send    func(edit LiveEdit, text string, force bool) (StoneJob, bool)
-	Reveal  func(edit LiveEdit, key string) (string, bool)
+	Reveal  func(edit LiveEdit, key string) <-chan Revealed
+}
+
+type Revealed struct {
+	Value string
+	OK    bool
 }
 
 type Toast struct {
@@ -73,6 +78,7 @@ type HUD struct {
 	DetailsCard   Details `json:"-"`
 	Stone         Stone   `json:"-"`
 	kube          *stoneRun
+	stoneHeld     bool
 	stoneMode     string
 	liveEdit      *editState
 	fetching      *stoneRun
@@ -228,6 +234,7 @@ func (h *HUD) Captures(x, y int, f Frame) bool {
 }
 
 func (h *HUD) Update(in Input, f Frame) []Intent {
+	h.seeOrder()
 	h.holdTerminal()
 	h.settleLive(f)
 	if in.Click || in.RightClick || len(in.Keys) > 0 {

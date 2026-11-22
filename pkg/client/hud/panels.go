@@ -119,42 +119,43 @@ func (h *HUD) drawLongAnswers(dst *ebiten.Image, c view.ChronicleView, buttons [
 	}
 }
 
+const (
+	soundTip      = "Music and sounds"
+	effectsTip    = "Reduce effects: no vignette, pulses or floating numbers"
+	fullscreenTip = "Fill the whole screen, or return to a window [F11 or Alt+Enter]"
+	edgeTip       = "Pan the map when the mouse touches the edge of the window"
+	namesTip      = "Story names with Kubernetes in brackets, or the real Kubernetes names everywhere (Pod, Node, Service)"
+)
+
+func onOff(name string, on bool, yes, no string) string {
+	if on {
+		return name + ": " + yes
+	}
+	return name + ": " + no
+}
+
+func soundLabel(muted bool) string     { return onOff("SOUND", muted, "OFF", "ON") }
+func effectsLabel(reduce bool) string  { return onOff("EFFECTS", reduce, "REDUCED", "FULL") }
+func namesLabel(trueNames bool) string { return onOff("NAMES", trueNames, "KUBERNETES", "STORY") }
+func edgeLabel(on bool) string         { return onOff("EDGE SCROLL", on, "ON", "OFF") }
+func fullscreenLabel(on bool) string   { return onOff("FULLSCREEN", on, "ON", "OFF") }
+
 func (h *HUD) menuLabels(f Frame) [][3]string {
-	sound := "SOUND: ON"
-	if f.Muted {
-		sound = "SOUND: OFF"
-	}
-	effects := "EFFECTS: FULL"
-	if f.Reduce {
-		effects = "EFFECTS: REDUCED"
-	}
-	names := "NAMES: STORY"
-	if f.TrueNames {
-		names = "NAMES: KUBERNETES"
-	}
-	edge := "EDGE SCROLL: OFF"
-	if h.edgeScroll {
-		edge = "EDGE SCROLL: ON"
-	}
 	experience := "EXPERIENCE: " + experienceNames[f.Experience()]
 	calm := "CALM REALM: OFF"
 	if f.State.CalmRealm {
 		calm = "CALM REALM: ON"
 	}
-	full := "FULLSCREEN: OFF"
-	if f.Fullscreen {
-		full = "FULLSCREEN: ON"
-	}
 	labels := [][3]string{
 		{"menu:resume", "RESUME", "Back to the realm [Esc]"},
 		{"menu:save", "SAVE REALM", "Write the realm to disk now"},
-		{"menu:mute", sound, "Music and sounds"},
-		{"menu:reduce", effects, "Reduce effects: no vignette, pulses or floating numbers"},
+		{"menu:mute", soundLabel(f.Muted), soundTip},
+		{"menu:reduce", effectsLabel(f.Reduce), effectsTip},
 		{"menu:coins", CoinFlightsLabel(h.Coins.mode), "Coins that fly from the Treasury to your purse: ALL of them, a FEW (the first ones, then only big payments), or OFF (the purse just pulses)"},
 		{"menu:pause", PauseLabel(h.pauseFor), pauseTip},
-		{"menu:fullscreen", full, "Fill the whole screen, or return to a window [F11 or Alt+Enter]"},
-		{"menu:edge", edge, "Pan the map when the mouse touches the edge of the window"},
-		{"menu:names", names, "Story names with Kubernetes in brackets, or the real Kubernetes names everywhere (Pod, Node, Service)"},
+		{"menu:fullscreen", fullscreenLabel(f.Fullscreen), fullscreenTip},
+		{"menu:edge", edgeLabel(h.edgeScroll), edgeTip},
+		{"menu:names", namesLabel(f.TrueNames), namesTip},
 		{"menu:experience", experience, "The choice from the start, kept in the save: NEW TO STRATEGY (the full guide), STRATEGY (no step holds you back; each lesson arrives as a one-line note and advice comes when a situation needs it) or KUBERNETES (a light guide, NAMES on, the Kubernetes side first). Press to change it."},
 		{"menu:calm", calm, "A calm realm sounds no Rush Tide and sends its troubles half as often. Kept in the save; the realm skips the Rush Tide step."},
 		{MenuPanels, "RESET PANELS", "Put every panel you moved back in its place. A double click on a panel's title bar puts just that one back."},

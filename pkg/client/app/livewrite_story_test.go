@@ -27,10 +27,11 @@ func TestTheDrainSpeaksOfTheQuorumAndOfSendingAwayInStory(t *testing.T) {
 	image := ledgerLine{at: at, verb: write.OrderSetImage, target: write.Ref{GVR: write.Deployments, Kind: "Deployment", Namespace: "market", Name: "web"}, code: 200, answer: "OK"}
 
 	ui.SetStoryNamer(lexicon.StoryText)
+	held, _ := codeWords(429, "x")
 	for got, want := range map[string]string{
 		budgetWords(least):          "QUORUM market/storefront: at least 2 must stand, 2 of 2 standing, 0 may leave now",
 		budgetWords(most):           "QUORUM market/kv: at most 50% may be away, 4 of 2 standing, 2 may leave now",
-		answerWords(429, "x"):       "the Quorum holds it",
+		held:                        "the Quorum holds it",
 		evict.text():                "14:09 SEND AWAY hut market/kv-0: done",
 		verbWords(write.OrderScale): "SCALE",
 	} {

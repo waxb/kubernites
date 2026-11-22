@@ -72,6 +72,12 @@ func (r *Renderer) drawOverlays(dst *ebiten.Image, cam render.Camera, sc Scene) 
 		r.drawHint(dst, sx, sy-lift*zoom, zoom, sc)
 	}
 	r.DrawBeacons(dst, cam, sc)
+	for _, k := range r.keepPips(cam, sc) {
+		r.placed = append(r.placed, k.plaque())
+	}
+	for _, b := range r.beaconSpots(cam, sc) {
+		r.placed = append(r.placed, beaconArrow(b.sx, b.sy, b.zoom))
+	}
 	r.drawLabels(dst, cam, sc)
 	r.drawPlaques(dst, cam, sc)
 	r.drawSignpostLabel(dst, cam, sc)
@@ -143,14 +149,38 @@ func (r *Renderer) drawLabels(dst *ebiten.Image, cam render.Camera, sc Scene) {
 			label = s.Label + " " + Itoa(int(s.Progress*100)) + "%"
 		}
 		w, _ := font.Measure(label, 1)
-		top := int(sy) - s.H*18*int(cam.Scale()) - 22
-		box, clear := r.settleLabel(ui.Rect{X: int(sx) - w/2 - 3, Y: top - 2, W: w + 6, H: 11}, int(sx), sc.Panels)
+		box, clear := r.settleStructureLabel(cam, s, sx, sy, w+6, labelH, sc.Panels)
 		if !clear {
 			continue
 		}
 		ui.Fill(dst, box, ui.Tint(ui.Palette.ConsoleEdge, 200))
-		font.Draw(dst, label, box.X+3, top, 1, ui.Palette.GoldBright)
+		font.Draw(dst, label, box.X+3, box.Y+2, 1, ui.Palette.GoldBright)
 	}
+}
+
+const (
+	labelH  = 11
+	plaqueH = 22
+)
+
+func (r *Renderer) drawnSpan(cam render.Camera, s view.Structure, sy float64) (top, bottom int, below bool) {
+	if hit, ok := r.HitOf(HitStructure, s.ID); ok && len(hit.Shapes) > 0 {
+		sh := hit.Shapes[0]
+		if up, down, ok := r.Lib.Extent(sh.Name); ok {
+			return int(math.Round(sh.Y - float64(up)*sh.Zoom)), int(math.Round(sh.Y + float64(down)*sh.Zoom)), true
+		}
+	}
+	return int(sy-float64(s.H*18)*cam.Scale()) - 13 + labelGap, 0, false
+}
+
+func (r *Renderer) settleStructureLabel(cam render.Camera, s view.Structure, sx, sy float64, w, h int, panels []ui.Rect) (ui.Rect, bool) {
+	top, bottom, below := r.drawnSpan(cam, s, sy)
+	box := ui.Rect{X: int(sx) - w/2, Y: top - labelGap - h, W: w, H: h}
+	if got, ok := r.settleLabelToward(box, int(sx), panels, -1); ok || !below {
+		return got, ok
+	}
+	box.Y = bottom + labelGap
+	return r.settleLabelToward(box, int(sx), panels, 1)
 }
 
 func (r *Renderer) drawPlaques(dst *ebiten.Image, cam render.Camera, sc Scene) {
@@ -165,8 +195,7 @@ func (r *Renderer) drawPlaques(dst *ebiten.Image, cam render.Camera, sc Scene) {
 		w1, _ := font.Measure(p.Title, 1)
 		w2, _ := literal.Measure(p.Line, 1)
 		w := max(w1, w2)
-		top := int(sy) - s.H*18*int(cam.Scale()) - 32
-		box, clear := r.settleLabel(ui.Rect{X: int(sx) - w/2 - 3, Y: top - 2, W: w + 6, H: 22}, int(sx), sc.Panels)
+		box, clear := r.settleStructureLabel(cam, s, sx, sy, w+6, plaqueH, sc.Panels)
 		if !clear {
 			continue
 		}

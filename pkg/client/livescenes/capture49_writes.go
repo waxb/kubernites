@@ -296,10 +296,18 @@ func pickerConfirm(level string, hover bool, set func(*hud.LivePicker)) func(*ap
 	}
 }
 
+func liveOnlyTitle(g *app.Game) {
+	names := g.Settings.TrueNames
+	g.Opts.LiveOnly, g.Title.LiveOnly, g.Settings.LiveNames = true, true, &names
+	app.ApplyNames(names)
+}
+
 func titleCaption(liveOnly bool) func(*app.Game) hud.Input {
 	return func(g *app.Game) hud.Input {
 		g.Scene = app.SceneTitle
-		g.Title.LiveOnly = liveOnly
+		if liveOnly {
+			liveOnlyTitle(g)
+		}
 		in := hud.Input{MX: -10, MY: -10}
 		for _, b := range g.Title.Buttons() {
 			if b.ID == "title:live" {
@@ -313,9 +321,26 @@ func titleCaption(liveOnly bool) func(*app.Game) hud.Input {
 	}
 }
 
+func titleSettings(g *app.Game) hud.Input {
+	g.Scene = app.SceneTitle
+	liveOnlyTitle(g)
+	if b, ok := hud.HitID(g.Title.Buttons(), hud.TitleSettingsID); ok {
+		_ = g.UpdateTitle(hud.Input{MX: b.Rect.X + 1, MY: b.Rect.Y + 1, Click: true})
+	}
+	in := hud.Input{MX: -10, MY: -10}
+	if b, ok := hud.HitID(g.Title.Buttons(), hud.StoneMenuID); ok {
+		in = hud.Input{MX: b.Rect.X + b.Rect.W/2, MY: b.Rect.Y + b.Rect.H/2}
+	}
+	for range hud.TitleTipTicks + 5 {
+		g.Title.Update(in)
+	}
+	return in
+}
+
 func init() {
 	app.CaptureScenes["live-title-caption"] = titleCaption(false)
 	app.CaptureScenes["live-title-caption-open"] = titleCaption(true)
+	app.CaptureScenes["live-title-settings"] = titleSettings
 	app.CaptureScenes["live-picker-box"] = pickerConfirm(hud.LevelReadOnly, true, nil)
 	app.CaptureScenes["live-picker-writes"] = pickerConfirm(hud.LevelWrites, false, nil)
 	app.CaptureScenes["live-picker-forced"] = pickerConfirm(hud.LevelReadOnly, true, func(p *hud.LivePicker) { p.Forced = true })

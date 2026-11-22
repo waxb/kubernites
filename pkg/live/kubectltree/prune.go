@@ -5,15 +5,19 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"net/url"
 	"runtime/debug"
+	"slices"
 	"strings"
 
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/util/version"
 	apimachineryversion "k8s.io/apimachinery/pkg/version"
 	"k8s.io/cli-runtime/pkg/genericclioptions"
 	"k8s.io/cli-runtime/pkg/genericiooptions"
+	"k8s.io/cli-runtime/pkg/resource"
 	"k8s.io/client-go/tools/clientcmd"
 	clientcmdapi "k8s.io/client-go/tools/clientcmd/api"
 	"k8s.io/kubectl/pkg/cmd/auth"
@@ -79,7 +83,7 @@ func (t *Tree) prune(root *cobra.Command, cf *genericclioptions.ConfigFlags, ios
 	if c := child(root, "edit"); c != nil {
 		routeEdit(c, r)
 	}
-	for _, name := range []string{"delete", "apply"} {
+	for _, name := range []string{"delete", "apply", "replace", "drain"} {
 		if c := child(root, name); c != nil {
 			destroying(c, r)
 		}
@@ -109,7 +113,7 @@ func (t *Tree) prune(root *cobra.Command, cf *genericclioptions.ConfigFlags, ios
 	}
 }
 
-func guardFiles(root *cobra.Command, r *run) {
+func (t *Tree) guardFiles(root *cobra.Command, r *run) {
 	if c := child(root, "debug"); c != nil {
 		lockFlag(c.Flags().Lookup("filename"), ReasonDebugFile, r)
 	}
@@ -118,20 +122,55 @@ func guardFiles(root *cobra.Command, r *run) {
 			if f := fs.Lookup("kustomize"); f != nil {
 				lockFlag(f, ReasonKustomize, r)
 			}
-			if f := fs.Lookup("filename"); f != nil {
-				if _, ok := f.Value.(guardedFiles); !ok {
-					f.Value = guardedFiles{Value: f.Value, run: r}
+		}
+		if c.DisableFlagParsing {
+			return
+		}
+		check := func(cmd *cobra.Command, args []string) error {
+			if err := t.checkReads(cmd, r.stdin); err != nil {
+				r.refuse(err.Error())
+				return err
+			}
+			if held, known := secretInputs(cmd, args); held && r.out != nil {
+				r.out.holdErr(known)
+			}
+			if clientSide(cmd) {
+				if r.out != nil {
+					r.out.hold(printedFormat(cmd))
+				}
+				if templated(cmd) && makesSecrets(cmd) {
+					r.refuse(ReasonClientSecret)
+					return errors.New(ReasonClientSecret)
 				}
 			}
-			for _, name := range []string{"from-file", "from-env-file", "custom", "cert", "key"} {
-				if f := fs.Lookup(name); f != nil {
-					if _, ok := f.Value.(guardedFiles); !ok {
-						f.Value = guardedFiles{Value: f.Value, run: r, keyed: name == "from-file"}
-					}
+			return nil
+		}
+		if run := c.Run; run != nil {
+			c.Run = func(cmd *cobra.Command, args []string) {
+				cmdutil.CheckErr(check(cmd, args))
+				run(cmd, args)
+			}
+		}
+		if run := c.RunE; run != nil {
+			c.RunE = func(cmd *cobra.Command, args []string) error {
+				if err := check(cmd, args); err != nil {
+					return err
 				}
+				return run(cmd, args)
 			}
 		}
 	})
+}
+
+func clientSide(cmd *cobra.Command) bool {
+	if f := cmd.Flags().Lookup("local"); f != nil && f.Value.String() == "true" {
+		return true
+	}
+	if cmd.Flags().Lookup("dry-run") == nil {
+		return false
+	}
+	strategy, err := cmdutil.GetDryRunStrategy(cmd)
+	return err == nil && strategy == cmdutil.DryRunClient
 }
 
 func destroying(c *cobra.Command, r *run) {
@@ -159,10 +198,18 @@ func severalAtOnce(cmd *cobra.Command, args []string) bool {
 		f := cmd.Flags().Lookup(name)
 		return f != nil && f.Changed && f.Value.String() != "" && f.Value.String() != "false"
 	}
-	if cmd.Name() == "apply" {
-		return changed("prune")
+	switch cmd.Name() {
+	case "apply":
+		return changed("prune") || changed("force") && manifestObjects(cmd) > 1
+	case "replace":
+		return changed("force") && manifestObjects(cmd) > 1
+	case "drain":
+		return changed("disable-eviction") || changed("force")
 	}
 	if changed("selector") || changed("all") || changed("field-selector") {
+		return true
+	}
+	if manifestObjects(cmd) > 1 {
 		return true
 	}
 	switch {
@@ -172,6 +219,83 @@ func severalAtOnce(cmd *cobra.Command, args []string) bool {
 		return strings.Contains(args[0], ",") || len(args) > 2
 	}
 	return len(args) > 1
+}
+
+func secretInputs(cmd *cobra.Command, args []string) (bool, []string) {
+	held := makesSecretCommand(cmd)
+	var known []string
+	if held {
+		known = append(known, typedSecretValues(cmd)...)
+	}
+	for _, a := range args {
+		for _, part := range strings.Split(a, ",") {
+			typ, _, _ := strings.Cut(strings.ToLower(part), "/")
+			if typ == "secret" || typ == "secrets" || strings.HasPrefix(typ, "secret.") || strings.HasPrefix(typ, "secrets.") {
+				held = true
+			}
+		}
+	}
+	if f := cmd.Flags().Lookup("filename"); f != nil && f.Changed {
+		files := flagValues(f)
+		if slices.Contains(files, "-") {
+			held = true
+		} else {
+			recursive := false
+			if r := cmd.Flags().Lookup("recursive"); r != nil {
+				recursive = r.Value.String() == "true"
+			}
+			resource.NewLocalBuilder().Unstructured().ContinueOnError().
+				FilenameParam(false, &resource.FilenameOptions{Filenames: files, Recursive: recursive}).
+				Flatten().Do().Visit(func(info *resource.Info, err error) error {
+				if err != nil || info == nil {
+					return nil
+				}
+				u, ok := info.Object.(*unstructured.Unstructured)
+				if !ok || u.GetKind() != "Secret" {
+					return nil
+				}
+				held = true
+				known = append(known, leafStrings(u.Object["data"])...)
+				known = append(known, leafStrings(u.Object["stringData"])...)
+				return nil
+			})
+		}
+	}
+	if held {
+		if p := cmd.Flags().Lookup("patch"); p != nil && p.Changed {
+			var doc any
+			if yaml.Unmarshal([]byte(p.Value.String()), &doc) == nil {
+				known = append(known, leafStrings(doc)...)
+			}
+		}
+	}
+	return held, known
+}
+
+func manifestObjects(cmd *cobra.Command) int {
+	f := cmd.Flags().Lookup("filename")
+	if f == nil || !f.Changed {
+		return 0
+	}
+	files := flagValues(f)
+	if slices.Contains(files, "-") {
+		return 2
+	}
+	recursive := false
+	if r := cmd.Flags().Lookup("recursive"); r != nil {
+		recursive = r.Value.String() == "true"
+	}
+	n := 0
+	err := resource.NewLocalBuilder().Unstructured().ContinueOnError().
+		FilenameParam(false, &resource.FilenameOptions{Filenames: files, Recursive: recursive}).
+		Flatten().Do().Visit(func(*resource.Info, error) error {
+		n++
+		return nil
+	})
+	if err != nil {
+		return max(n, 2)
+	}
+	return n
 }
 
 func child(c *cobra.Command, name string) *cobra.Command {
@@ -248,6 +372,14 @@ func (r redacted) GetStartingConfig() (*clientcmdapi.Config, error) {
 		return nil, err
 	}
 	cfg = cfg.DeepCopy()
+	for _, cluster := range cfg.Clusters {
+		if cluster != nil && cluster.ProxyURL != "" {
+			cluster.ProxyURL = redactedURL(cluster.ProxyURL)
+		}
+		if cluster != nil {
+			cluster.Server = write.RedactServer(cluster.Server)
+		}
+	}
 	for _, user := range cfg.AuthInfos {
 		if user == nil {
 			continue
@@ -276,6 +408,17 @@ func (r redacted) GetStartingConfig() (*clientcmdapi.Config, error) {
 		}
 	}
 	return cfg, nil
+}
+
+func redactedURL(raw string) string {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return Redacted
+	}
+	if u.User != nil {
+		u.User = url.User(Redacted)
+	}
+	return u.String()
 }
 
 func canI(c *cobra.Command, cf *genericclioptions.ConfigFlags, ios genericiooptions.IOStreams) {

@@ -78,6 +78,14 @@ func init() {
 		}
 		return idleInput()
 	})
+	app.CaptureScenes["engineer-sea-card"] = liveScene(ManagedSnapshot, openDetails(func(st view.Structure) bool { return st.Kind == live.KindSeaChancery }))
+	app.CaptureScenes["engineer-foreign-card"] = liveScene(ManagedSnapshot, selectFirst(func(st view.Structure) bool { return st.Kind == live.KindForeign }))
+	app.CaptureScenes["engineer-vault-card"] = liveScene(ManagedSnapshot, func(s *app.Session) hud.Input {
+		selectFirst(func(st view.Structure) bool {
+			return st.Kind == view.StructVault && st.Object.Kind == "PersistentVolumeClaim"
+		})(s)
+		return hoverButton(s, hud.ActionPrefix+":"+hud.KeyGet)
+	})
 	app.CaptureScenes["engineer-hut-card"] = liveScene(ManagedSnapshot, func(s *app.Session) hud.Input {
 		SelectPod(s, func(p model.PodView) bool { return p.Namespace == "market" && p.Owner != "" })
 		if k, ok := keepOfNode(s.Site, s.Selection.Pod.Node); ok {
@@ -163,6 +171,29 @@ func hoverFirst(match func(view.Structure) bool) func(*app.Session) hud.Input {
 			x, y := world.ScreenOf(s.Cam, s.Site, c)
 			return hud.Input{MX: int(x), MY: int(y) - hoverLift*int(s.Cam.Scale())}
 		}
+		return idleInput()
+	}
+}
+
+func selectFirst(match func(view.Structure) bool) func(*app.Session) hud.Input {
+	return func(s *app.Session) hud.Input {
+		for _, st := range s.Site.Structures {
+			if match(st) {
+				c := world.FootprintCentre(st)
+				s.CenterOn(c.X, c.Y)
+				SelectStructure(s, st)
+				break
+			}
+		}
+		return idleInput()
+	}
+}
+
+func openDetails(match func(view.Structure) bool) func(*app.Session) hud.Input {
+	return func(s *app.Session) hud.Input {
+		selectFirst(match)(s)
+		PressButton(s, "sel:details")
+		Settle(s, .5)
 		return idleInput()
 	}
 }

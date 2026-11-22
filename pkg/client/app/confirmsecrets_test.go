@@ -107,3 +107,16 @@ func TestTheStoryConfirmSaysWhatItChanges(t *testing.T) {
 		}
 	}
 }
+
+func TestALongDownloadAsksToCopyOnWithWhatItHasWritten(t *testing.T) {
+	ask := RenderAsk(live.StoneAsk{More: "1.0 GiB in 312 files", Local: "/home/me/Downloads/Kubernites/logs", Writing: true})
+	text := ask.Title + "\n" + strings.Join(ask.Lines, "\n")
+	for _, want := range []string{"KEEP COPYING", "1.0 GiB in 312 files", "/home/me/Downloads/Kubernites/logs", "N stops"} {
+		if !strings.Contains(text, want) {
+			t.Errorf("the ask does not say %q:\n%s", want, text)
+		}
+	}
+	if !ask.Confirm {
+		t.Error("the ask takes no answer")
+	}
+}

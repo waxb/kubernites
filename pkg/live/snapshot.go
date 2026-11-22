@@ -275,7 +275,7 @@ func take(ctx context.Context, l lister, now time.Time, ns string, progress func
 	r := &reading{l: l, s: &s, ns: ns, progress: progress, at: Progress{List: "version", Total: len(kindReads) + 1}}
 	var v version.Info
 	if err := l.getJSON(ctx, "/version", nil, &v); err != nil {
-		return s, fmt.Errorf("the cluster does not answer: %w", err)
+		return s, NoAnswer(err)
 	}
 	s.Version = v.GitVersion
 	r.at.Done = 1

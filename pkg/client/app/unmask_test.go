@@ -1,6 +1,7 @@
 package app
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -57,7 +58,7 @@ func TestOnlyACoreSecretsHiddenValuesAreReadBackOnSend(t *testing.T) {
 	if keys := maskedKeys(e.Kind, custom); len(keys) != 0 {
 		t.Errorf("a custom resource of kind Secret shows hidden keys %v", keys)
 	}
-	out, err := unmask(bareTree{tree}, e, custom)
+	out, err := unmask(context.Background(), bareTree{tree}, e, custom)
 	if strings.Contains(out, "Q09SRS1TRUNSRVQ=") {
 		t.Fatalf("SEND would write the core Secret's value into a custom resource:\n%s", out)
 	}
@@ -65,7 +66,7 @@ func TestOnlyACoreSecretsHiddenValuesAreReadBackOnSend(t *testing.T) {
 	if keys := maskedKeys("Secret", core); len(keys) != 1 {
 		t.Fatalf("a core Secret's hidden keys: %v", keys)
 	}
-	if back, err := unmask(bareTree{tree}, e, core); err != nil || !strings.Contains(back, "Q09SRS1TRUNSRVQ=") {
+	if back, err := unmask(context.Background(), bareTree{tree}, e, core); err != nil || !strings.Contains(back, "Q09SRS1TRUNSRVQ=") {
 		t.Fatalf("a core Secret's hidden value was not read back: %v\n%s", err, back)
 	}
 }

@@ -62,6 +62,16 @@ type Realm struct {
 	staleWhy   string
 	tree       *kubectltree.Tree
 	gate       *write.Gate
+	leftAt     time.Time
+}
+
+const realmLeft = "the realm was left: its connection is closed"
+
+func (r *Realm) now() time.Time {
+	if r.wire != nil && r.wire.now != nil {
+		return r.wire.now()
+	}
+	return time.Now()
 }
 
 func Open(s Snapshot, logs podLogReader, usage Usage) (*Realm, error) {
@@ -86,11 +96,11 @@ func OpenContext(ctx context.Context, s Snapshot, logs podLogReader, usage Usage
 func Connect(ctx context.Context, paths []string, name string, now time.Time, progress func(Progress)) (*Realm, error) {
 	conn, err := Dial(paths, name)
 	if err != nil {
-		return nil, err
+		return nil, redacted(err)
 	}
 	r, err := connectOver(ctx, conn, now, progress)
 	if err != nil {
-		return nil, err
+		return nil, redacted(err)
 	}
 	r.tree = openTree(paths, name, conn.rest, nil)
 	return r, nil
@@ -99,12 +109,12 @@ func Connect(ctx context.Context, paths []string, name string, now time.Time, pr
 func ConnectGated(ctx context.Context, paths []string, name string, g *write.Gate, now time.Time, progress func(Progress)) (*Realm, error) {
 	conn, err := DialGated(paths, name, g)
 	if err != nil {
-		return nil, err
+		return nil, redacted(err)
 	}
 	g.LearnLocalGroups(ctx)
 	r, err := connectOver(ctx, conn, now, progress)
 	if err != nil {
-		return nil, err
+		return nil, redacted(err)
 	}
 	r.gate = g
 	g.StaleWhen(r.staleReason)
@@ -117,6 +127,12 @@ func (r *Realm) Gate() *write.Gate {
 }
 
 func (r *Realm) staleReason() string {
+	r.mu.Lock()
+	left := r.stopped
+	r.mu.Unlock()
+	if left {
+		return realmLeft
+	}
 	f := r.Freshness()
 	if f.StaleSince.IsZero() {
 		return ""
@@ -154,12 +170,38 @@ func connectOver(ctx context.Context, conn *Conn, now time.Time, progress func(P
 	return r, nil
 }
 
+type redactedError struct{ err error }
+
+func (e redactedError) Error() string { return write.Redact(e.err.Error()) }
+func (e redactedError) Unwrap() error { return e.err }
+
+func redacted(err error) error {
+	if err == nil {
+		return nil
+	}
+	return redactedError{err: err}
+}
+
 func WhoAmI(ctx context.Context, paths []string, name string) (Identity, error) {
 	conn, err := Dial(paths, name)
 	if err != nil {
-		return Identity{Unknown: err.Error()}, err
+		return Identity{Unknown: write.Redact(err.Error())}, redacted(err)
 	}
-	return conn.WhoAmI(ctx)
+	return whoOver(ctx, conn)
+}
+
+func whoOver(ctx context.Context, conn *Conn) (Identity, error) {
+	who, err := conn.WhoAmI(ctx)
+	if err != nil {
+		err = withDNSHint(err)
+		if who.Unknown != "" {
+			who.Unknown = err.Error()
+		}
+	}
+	if who.Unknown != "" {
+		who.Unknown = write.Redact(who.Unknown)
+	}
+	return who, redacted(err)
 }
 
 func (r *Realm) World() *World {

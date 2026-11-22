@@ -43,7 +43,7 @@ func pickerMemory(m write.Memory) map[string]hud.LiveMemory {
 		for i, c := range r.Classes {
 			classes[i] = string(c)
 		}
-		out[r.Context.Name] = hud.LiveMemory{Server: r.Context.Server, User: r.Context.User, Level: r.Level.String(), Warned: r.Warned.String(), Classes: classes}
+		out[r.Context.Name] = hud.LiveMemory{Server: write.RedactServer(r.Context.Server), User: r.Context.User, Identity: r.Context.Identity, Level: r.Level.String(), Warned: r.Warned.String(), Classes: classes}
 	}
 	return out
 }
@@ -55,17 +55,25 @@ func (g *Game) saveChoices() {
 	g.Picker.Remembered = pickerMemory(g.choices)
 }
 
-func (g *Game) forgetChoice(name string) {
-	g.choices.Forget(name)
+func (g *Game) updateChoices(change func(*write.Memory)) {
+	if dir := g.LiveDir(); dir != "" {
+		if mem, err := write.LoadMemory(dir); err == nil {
+			g.choices = mem
+		}
+	}
+	change(&g.choices)
 	g.saveChoices()
+}
+
+func (g *Game) forgetChoice(name string) {
+	g.updateChoices(func(m *write.Memory) { m.Forget(name) })
 	if gate := g.openGate(); gate != nil && gate.Context().Name == name {
 		gate.Forget()
 	}
 }
 
 func (g *Game) forgetAllChoices() {
-	g.choices.ForgetAll()
-	g.saveChoices()
+	g.updateChoices(func(m *write.Memory) { m.ForgetAll() })
 	if gate := g.openGate(); gate != nil {
 		gate.Forget()
 	}
@@ -84,7 +92,7 @@ func (g *Game) openGate() *write.Gate {
 func (g *Game) pickedContext(name string) (write.Context, bool) {
 	for _, c := range g.Picker.Contexts {
 		if c.Name == name {
-			return write.Context{Name: c.Name, Server: c.Server, User: c.User}, true
+			return write.Context{Name: c.Name, Server: c.Server, User: c.User, Identity: c.Identity, ClusterID: c.ClusterID}, true
 		}
 	}
 	return write.Context{}, false
@@ -123,24 +131,26 @@ func (g *Game) confirmedChoice(name, level string) (write.Choice, error) {
 }
 
 func (g *Game) rememberChoice(c write.Choice) {
-	warned := c.Level
-	if r, _, ok := g.choices.Recall(c.Context); ok && r.Warned > warned {
-		warned = r.Warned
-	}
-	g.choices.Keep(write.Remembered{Context: c.Context, Level: c.Level, Warned: warned, Classes: c.Classes})
-	g.saveChoices()
+	g.updateChoices(func(m *write.Memory) {
+		warned := c.Level
+		if r, _, ok := m.Recall(c.Context); ok && r.Warned > warned {
+			warned = r.Warned
+		}
+		m.Keep(write.Remembered{Context: c.Context, Level: c.Level, Warned: warned, Classes: c.Classes})
+	})
 }
 
 func (g *Game) rememberClass(ctx write.Context, c write.Class) {
-	r, _, ok := g.choices.Recall(ctx)
-	if !ok {
-		return
-	}
-	if !slices.Contains(r.Classes, c) {
-		r.Classes = append(r.Classes, c)
-	}
-	g.choices.Keep(r)
-	g.saveChoices()
+	g.updateChoices(func(m *write.Memory) {
+		r, _, ok := m.Recall(ctx)
+		if !ok {
+			return
+		}
+		if !slices.Contains(r.Classes, c) {
+			r.Classes = append(r.Classes, c)
+		}
+		m.Keep(r)
+	})
 }
 
 func (g *Game) toggleHints() {
@@ -170,7 +180,14 @@ func (g *Game) pushChoices() {
 		for i, c := range r.Classes {
 			classes[i] = string(c)
 		}
-		rows = append(rows, hud.LiveChoice{Name: r.Context.Name, Server: r.Context.Server, Level: r.Level.String(), Classes: classes})
+		rows = append(rows, hud.LiveChoice{Name: r.Context.Name, Server: write.RedactServer(r.Context.Server), Level: r.Level.String(), Classes: classes})
+	}
+	if gate := g.openGate(); gate != nil && !slices.ContainsFunc(rows, func(c hud.LiveChoice) bool { return c.Name == gate.Context().Name }) {
+		var classes []string
+		for _, c := range gate.Classes() {
+			classes = append(classes, string(c))
+		}
+		rows = append(rows, hud.LiveChoice{Name: gate.Context().Name, Server: write.RedactServer(gate.Context().Server), Level: gate.Level().String(), Classes: classes})
 	}
 	g.Sess.Hud.SetLiveChoices(rows)
 }

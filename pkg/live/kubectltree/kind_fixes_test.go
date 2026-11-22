@@ -198,8 +198,17 @@ func (k fixKind) realm(path string, level write.Level, classes ...write.Class) (
 		k.t.Cleanup(r.Stop)
 		return r, nil
 	}
-	cluster, _ := k.entry(path)
-	g, err := write.New(write.Choice{Context: write.Context{Name: k.ctx, Server: cluster.Server, User: "fix"}, Level: level, Classes: classes})
+	listed, err := live.ListContexts([]string{path})
+	if err != nil {
+		k.t.Fatal(err)
+	}
+	var choice write.Context
+	for _, c := range listed {
+		if c.Name == k.ctx {
+			choice = c.Remembered()
+		}
+	}
+	g, err := write.New(write.Choice{Context: choice, Level: level, Classes: classes})
 	if err != nil {
 		k.t.Fatal(err)
 	}

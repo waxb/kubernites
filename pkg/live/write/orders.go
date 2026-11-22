@@ -180,7 +180,7 @@ func versioned(rv string, rest map[string]any) map[string]any {
 }
 
 func patch(o Order, verb, contentType string, body any, sub string) Order {
-	o.Request = Request{Method: http.MethodPatch, Path: o.Target.Path(o.Target.Namespace, o.Target.Name, subs(sub)...), Query: fieldManager(), Body: mustJSON(body)}
+	o.Request = Request{Method: http.MethodPatch, Path: o.Target.Path(o.Target.Namespace, o.Target.Name, subs(sub)...), Query: fieldManager(), Body: mustJSON(body), ContentType: contentType}
 	o.ContentType = contentType
 	o.Access = Access{Verb: "patch", Group: o.Target.Group, Version: o.Target.Version, Resource: o.Target.Resource, Subresource: sub, Namespace: o.Target.Namespace, Name: o.Target.Name}
 	o.Verb = verb
@@ -515,7 +515,7 @@ func Delete(r Ref, p Propagation, force bool) (Order, error) {
 	}
 	o := Order{Verb: OrderDelete, Target: r}
 	o.Request = Request{Method: http.MethodDelete, Path: r.Path(r.Namespace, r.Name), Body: mustJSON(deleteOptions(r, p, grace))}
-	o.ContentType = JSONBody
+	o.ContentType, o.Request.ContentType = JSONBody, JSONBody
 	o.Access = Access{Verb: "delete", Group: r.Group, Version: r.Version, Resource: r.Resource, Namespace: r.Namespace, Name: r.Name}
 	o.Classes = ClassesOf(o.Request)
 	o.Fields = []Field{{Label: "deletionTimestamp", Path: []string{"metadata", "deletionTimestamp"}}}
@@ -538,7 +538,7 @@ func Kill(p *corev1.Pod) (Order, error) {
 	one := int64(1)
 	o := Order{Verb: OrderKill, Target: r}
 	o.Request = Request{Method: http.MethodDelete, Path: r.Path(r.Namespace, r.Name), Body: mustJSON(deleteOptions(r, "", &one))}
-	o.ContentType = JSONBody
+	o.ContentType, o.Request.ContentType = JSONBody, JSONBody
 	o.Access = Access{Verb: "delete", Version: "v1", Resource: "pods", Namespace: r.Namespace, Name: r.Name}
 	o.Classes = ClassesOf(o.Request)
 	o.Fields = []Field{{Label: "deletionTimestamp", Path: []string{"metadata", "deletionTimestamp"}}}
@@ -578,7 +578,7 @@ func Evict(p *corev1.Pod) (Order, error) {
 	}
 	o := Order{Verb: OrderEvict, Target: r}
 	o.Request = Request{Method: http.MethodPost, Path: r.Path(r.Namespace, r.Name, "eviction"), Body: mustJSON(body)}
-	o.ContentType = JSONBody
+	o.ContentType, o.Request.ContentType = JSONBody, JSONBody
 	o.Access = Access{Verb: "create", Version: "v1", Resource: "pods", Subresource: "eviction", Namespace: r.Namespace, Name: r.Name}
 	o.Classes = ClassesOf(o.Request)
 	return o, nil
@@ -618,7 +618,7 @@ func Trigger(cj *batchv1.CronJob, suffix string) (Order, error) {
 	}
 	o := Order{Verb: OrderTrigger, Target: RefOf(CronJobs, "CronJob", cj)}
 	o.Request = Request{Method: http.MethodPost, Path: Jobs.Path(cj.Namespace, ""), Query: fieldManager(), Body: mustJSON(job)}
-	o.ContentType = JSONBody
+	o.ContentType, o.Request.ContentType = JSONBody, JSONBody
 	o.Access = Access{Verb: "create", Group: "batch", Version: "v1", Resource: "jobs", Namespace: cj.Namespace}
 	o.Classes = ClassesOf(o.Request)
 	o.Fields = []Field{{Label: "job", Path: []string{"metadata", "name"}}}

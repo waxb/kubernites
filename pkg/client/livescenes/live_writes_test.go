@@ -74,12 +74,12 @@ func TestEveryWritesSceneShowsWhatItNames(t *testing.T) {
 		},
 		"live-class-unpreviewed": func(s *app.Session) string {
 			f, ok := s.Hud.OrderOpen()
-			return expect(ok && f.Warning && strings.Contains(f.Note, "does not support dry run"), "form %+v", f)
+			return expect(ok && f.Warning && strings.Contains(f.Note, "switch NAMES to read why") && !strings.Contains(f.Note, "dry run"), "form %+v", f)
 		},
 		"live-refused": func(s *app.Session) string {
 			for _, o := range s.Hud.LiveOrders() {
 				if o.Key == "scale" {
-					return expect(o.Disabled && strings.Contains(o.Tip, "cannot patch"), "scale %+v", o)
+					return expect(o.Disabled && strings.Contains(o.Tip, "they may not scale it") && !strings.Contains(o.Tip, refusalReason), "scale %+v", o)
 				}
 			}
 			return "no scale order"

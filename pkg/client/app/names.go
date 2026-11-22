@@ -19,11 +19,13 @@ func ApplyNames(on bool) {
 }
 
 func (g *Game) toggleNames() {
-	if g.Sess != nil && g.Sess.Live {
+	if g.namesAreLive() {
 		on := !g.liveNames()
 		g.Settings.LiveNames = &on
 		ApplyNames(on)
-		g.Sess.TrueNames = on
+		if g.Sess != nil {
+			g.Sess.TrueNames = on
+		}
 		if err := SaveSettings(g.SettingsPath(), g.Settings); err != nil {
 			g.Log.Warn("could not save settings", "err", err)
 		}
@@ -37,6 +39,13 @@ func (g *Game) toggleNames() {
 	if err := SaveSettings(g.SettingsPath(), g.Settings); err != nil {
 		g.Log.Warn("could not save settings", "err", err)
 	}
+}
+
+func (g *Game) namesAreLive() bool {
+	if g.Sess != nil {
+		return g.Sess.Live
+	}
+	return g.Title.LiveOnly
 }
 
 func (g *Game) liveNames() bool {

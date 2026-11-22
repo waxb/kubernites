@@ -42,7 +42,11 @@ func connectAt(t *testing.T, level string, o livetest.Options, classes ...write.
 	dir := t.TempDir()
 	g := NewGame(nil, Options{LiveOnly: true, SettingsDir: dir, Live: LiveSource{Files: []string{kubeconfig}}}, nil, nil)
 	if len(classes) > 0 {
-		g.choices.Keep(write.Remembered{Context: write.Context{Name: livetest.Context, Server: srv.URL, User: "fake-user"}, Level: write.Writes, Warned: write.Seamless, Classes: classes})
+		listed, err := live.ListContexts([]string{kubeconfig})
+		if err != nil || len(listed) != 1 {
+			t.Fatalf("contexts %+v %v", listed, err)
+		}
+		g.choices.Keep(write.Remembered{Context: listed[0].Remembered(), Level: write.Writes, Warned: write.Seamless, Classes: classes})
 		if err := write.SaveMemory(dir, g.choices); err != nil {
 			t.Fatal(err)
 		}
@@ -639,5 +643,66 @@ func TestAtSeamlessADrainAsksFirstAsK9sDoesAndTheWarningNamesEveryOneChordWrite(
 		if !strings.Contains(warning, order) {
 			t.Errorf("the SEAMLESS warning does not say %s asks first", order)
 		}
+	}
+}
+
+func TestOneDrainAtATimeASecondIsRefusedNamingTheRunningDrainsNode(t *testing.T) {
+	rig := connectAt(t, hud.LevelSeamless, livetest.Options{Answer: func(r *http.Request, _ []byte) (int, string, bool) {
+		if strings.HasSuffix(r.URL.Path, "/eviction") {
+			return http.StatusTooManyRequests, `{"kind":"Status","code":429,"message":"Cannot evict pod as it would violate the pod's disruption budget."}`, true
+		}
+		return 0, "", false
+	}}, write.AllClasses...)
+	rig.s.Writer.sync = false
+	if len(rig.snap.Nodes) < 2 {
+		t.Fatal("the fixture needs two Keeps")
+	}
+	keepOf := func(node string) hud.Selection {
+		i := slices.IndexFunc(rig.s.Site.Structures, func(st view.Structure) bool { return st.Kind == view.StructKeep && st.Object.Name == node })
+		if i < 0 {
+			t.Fatalf("no Keep for node %s", node)
+		}
+		return hud.Selection{Kind: "structure", ID: rig.s.Site.Structures[i].ID, Structure: rig.s.Site.Structures[i]}
+	}
+	settle := func() {
+		for i := 0; i < 400 && slices.ContainsFunc(rig.s.Hud.LiveOrders(), func(o hud.LiveOrder) bool { return o.Why == askingWhy }); i++ {
+			time.Sleep(5 * time.Millisecond)
+			rig.frame()
+		}
+	}
+	first, second := rig.snap.Nodes[len(rig.snap.Nodes)-1].Name, rig.snap.Nodes[0].Name
+	rig.select_(keepOf(first))
+	settle()
+	rig.goAll("drain", 1)
+	for deadline := time.Now().Add(10 * time.Second); rig.s.Writer.drain == nil || rig.s.Writer.drain.blocked == ""; time.Sleep(5 * time.Millisecond) {
+		if time.Now().After(deadline) {
+			t.Fatal("the first drain never waited on its budget")
+		}
+		rig.frame()
+	}
+	orders := rig.select_(keepOf(second))
+	settle()
+	orders = rig.s.Hud.LiveOrders()
+	i := slices.IndexFunc(orders, func(o hud.LiveOrder) bool { return o.Key == "drain" })
+	if i < 0 || !orders[i].Disabled || !strings.Contains(orders[i].Tip, first) {
+		t.Fatalf("a second DRAIN while %s drains: %+v", first, orders)
+	}
+	before := len(changes(rig.rec.Full()))
+	rig.do(hud.Intent{Kind: hud.IntentLiveOrder, Target: "drain"})
+	if _, open := rig.s.Hud.OrderOpen(); open || len(changes(rig.rec.Full())) != before || rig.s.Writer.drain.node != first {
+		t.Fatalf("the second DRAIN started: drain on %s", rig.s.Writer.drain.node)
+	}
+	rig.s.Writer.drain.stop()
+	for deadline := time.Now().Add(10 * time.Second); !rig.s.Writer.drain.over; time.Sleep(5 * time.Millisecond) {
+		if time.Now().After(deadline) {
+			t.Fatal("STOP did not end the drain")
+		}
+		rig.frame()
+	}
+	rig.select_(keepOf(second))
+	settle()
+	orders = rig.s.Hud.LiveOrders()
+	if i := slices.IndexFunc(orders, func(o hud.LiveOrder) bool { return o.Key == "drain" }); i < 0 || orders[i].Disabled {
+		t.Fatalf("after the first drain stopped, DRAIN on %s: %+v", second, orders)
 	}
 }

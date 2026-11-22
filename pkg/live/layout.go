@@ -326,7 +326,7 @@ func vaultItem(pvc corev1.PersistentVolumeClaim, holder string) item {
 		held, heldBy = "held by "+holder, "mounted by "+holder
 	}
 	return item{isle: -1, kind: view.StructVault, w: 2, h: 2, variant: state,
-		object: view.ObjectRef{Kind: "PersistentVolumeClaim", Namespace: pvc.Namespace, Name: pvc.Name}, label: "Vault " + pvc.Name, state: view.StateReady,
+		object: view.ObjectRef{Kind: "PersistentVolumeClaim", Namespace: pvc.Namespace, Name: pvc.Name}, label: "Deed " + pvc.Name, state: view.StateReady,
 		tip: Tip{Story: fmt.Sprintf("Vault for the Deed %s: %s of the vault kind %s, %s", pvc.Name, size, orNone(class), held),
 			Names: fmt.Sprintf("PVC %s/%s %s to PV %s, StorageClass %s, %s, %s", pvc.Namespace, pvc.Name, phase, orNone(pvc.Spec.VolumeName), orNone(class), size, heldBy)}}
 }
@@ -339,11 +339,18 @@ func orNone(s string) string {
 }
 
 type foreignKind struct {
-	ns, group, kind, version string
-	n                        int
+	ns, group, kind, version, plural string
+	n                                int
 }
 
 var helperGroups = map[string]string{"cert-manager.io": "seal-smithy", "acme.cert-manager.io": "seal-smithy", "external-secrets.io": "key-gate"}
+
+func (f foreignKind) resource() string {
+	if f.plural == "" {
+		return strings.ToLower(f.kind)
+	}
+	return f.plural + "." + f.group
+}
 
 func (f foreignKind) item() item {
 	kind := KindForeign
@@ -355,15 +362,15 @@ func (f foreignKind) item() item {
 		where, whereNames = "in the fief "+f.ns, "in namespace "+f.ns
 	}
 	return item{isle: -1, kind: kind, w: 2, h: 2, variant: f.group,
-		object: view.ObjectRef{Kind: f.kind, Namespace: f.ns, Name: f.group}, label: "Foreign hall of " + f.kind, state: view.StateReady,
+		object: view.ObjectRef{Kind: f.kind, Namespace: f.ns, Resource: f.resource()}, label: "Foreign hall of " + f.kind, state: view.StateReady,
 		tip: Tip{Story: fmt.Sprintf("Foreign hall of the %s from %s: %d %s", f.kind, f.group, f.n, where),
 			Names: fmt.Sprintf("%d %s (%s/%s) %s", f.n, f.kind, f.group, f.version, whereNames)}}
 }
 
 func foreignKinds(s Snapshot) []foreignKind {
-	version := map[string]string{}
+	version, plural := map[string]string{}, map[string]string{}
 	for _, c := range s.CRDs {
-		version[c.Group+"/"+c.Kind] = c.Version
+		version[c.Group+"/"+c.Kind], plural[c.Group+"/"+c.Kind] = c.Version, c.Plural
 	}
 	count := map[[3]string]int{}
 	for _, r := range s.Custom {
@@ -371,7 +378,7 @@ func foreignKinds(s Snapshot) []foreignKind {
 	}
 	out := []foreignKind{}
 	for k, n := range count {
-		out = append(out, foreignKind{ns: k[0], group: k[1], kind: k[2], version: version[k[1]+"/"+k[2]], n: n})
+		out = append(out, foreignKind{ns: k[0], group: k[1], kind: k[2], version: version[k[1]+"/"+k[2]], plural: plural[k[1]+"/"+k[2]], n: n})
 	}
 	sort.Slice(out, func(i, j int) bool {
 		a, b := out[i], out[j]

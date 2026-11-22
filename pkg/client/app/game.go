@@ -76,7 +76,7 @@ func NewGame(r client.Realm, opts Options, lib *gfx.Library, audio *sound.Manage
 	if settings.Fullscreen {
 		g.window.SetFullscreen(true)
 	}
-	ApplyNames(settings.TrueNames)
+	ApplyNames(g.titleNames())
 	g.applyVolumes()
 	controls, err := LoadControls(ControlsPath(opts.SavePath))
 	if err != nil {
@@ -122,9 +122,6 @@ func (g *Game) Shutdown() {
 	g.MarkClosed()
 	g.Dev.Close()
 	g.stopWatching()
-	if g.Sess != nil {
-		g.Sess.stepForwards()
-	}
 }
 
 func (g *Game) Clock() float64 {
@@ -153,6 +150,7 @@ func (g *Game) UpdateTitle(in hud.Input) error {
 	case g.Picker.Active():
 		intents = g.Picker.Update(in)
 	default:
+		g.Title.Settings = g.titleSettings()
 		intents = g.Title.Update(in)
 	}
 	for _, it := range intents {
@@ -160,11 +158,16 @@ func (g *Game) UpdateTitle(in hud.Input) error {
 			return err
 		}
 	}
+	g.Title.Settings = g.titleSettings()
 	return nil
 }
 
 func (g *Game) TitleIntent(it hud.Intent) error {
 	if g.liveIntent(it) {
+		return nil
+	}
+	if g.settingIntent(it) {
+		g.audio.PlaySFX(sound.SFXClick)
 		return nil
 	}
 	switch it.Kind {
@@ -278,26 +281,19 @@ func (g *Game) RealmIntent(it hud.Intent) error {
 		if err := g.Save(); err == nil {
 			g.Sess.Hud.Toast("The realm is saved", false)
 		}
-	case hud.IntentMute:
-		g.audio.SetMuted(!g.audio.Muted())
+	case hud.IntentMute, hud.IntentReduce, hud.IntentEdge, hud.IntentStone, hud.IntentHints, hud.IntentFullscreen, hud.IntentVolume:
+		g.settingIntent(it)
 	case hud.IntentTitle:
 		g.leaveTrial()
 		g.leaveChapter(false)
 		g.Save()
 		g.leaveLive()
 		g.Scene = SceneTitle
-	case hud.IntentReduce:
-		g.toggleReduce()
-	case hud.IntentEdge:
-		g.ToggleEdge()
-	case hud.IntentStone:
-		g.toggleStone()
-	case hud.IntentHints:
-		g.toggleHints()
 	case hud.IntentLiveChoices:
-		if it.Command == "forget-all" {
+		switch it.Command {
+		case "forget-all":
 			g.forgetAllChoices()
-		} else {
+		case "forget":
 			g.forgetChoice(it.Target)
 		}
 		g.pushChoices()
@@ -307,14 +303,10 @@ func (g *Game) RealmIntent(it hud.Intent) error {
 			break
 		}
 		g.toggleNames()
-	case hud.IntentFullscreen:
-		g.ToggleFullscreen()
 	case hud.IntentPausePolicy:
 		g.cyclePausePolicy()
 	case hud.IntentCoinFlights:
 		g.cycleCoinFlights()
-	case hud.IntentVolume:
-		g.stepVolume(it.Command)
 	case hud.IntentPanels:
 		g.savePanels()
 	case hud.IntentReforge:

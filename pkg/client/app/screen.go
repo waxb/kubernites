@@ -105,12 +105,53 @@ func (g *Game) drawScaleHint(dst *ebiten.Image) {
 	if !g.ScaleHinted() {
 		return
 	}
+	r := g.ScaleHintRect()
 	var font ui.Font
-	w, _ := font.Measure(scaleHint, 1)
-	r := ui.Rect{X: hud.Width/2 - w/2 - 6, Y: hud.ConsoleY - 38, W: w + 12, H: 15}
 	ui.Fill(dst, r, ui.Tint(ui.Palette.ConsoleEdge, 220))
 	ui.Stroke(dst, r, ui.Palette.Gold)
 	font.Draw(dst, scaleHint, r.X+6, r.Y+4, 1, ui.Palette.Text)
+}
+
+func (g *Game) ScaleHintRect() ui.Rect {
+	var font ui.Font
+	w, _ := font.Measure(scaleHint, 1)
+	r := ui.Rect{X: hud.Width/2 - w/2 - 6, Y: hud.ConsoleY - 38, W: w + 12, H: 15}
+	if g.Scene != SceneTitle {
+		return r
+	}
+	shown := g.titleShown()
+	for moved := true; moved; {
+		moved = false
+		for _, s := range shown {
+			if s.W > 0 && overlaps(r, s) {
+				r.Y, moved = s.Y+s.H+scaleHintGap, true
+			}
+		}
+	}
+	if r.Y+r.H > hud.Height-scaleHintGap {
+		r.Y = hud.Height - scaleHintGap - r.H
+	}
+	return r
+}
+
+const scaleHintGap = 4
+
+func (g *Game) titleShown() []ui.Rect {
+	switch {
+	case g.Chapters.Active():
+		return g.Chapters.Shown()
+	case g.Picker.Active():
+		out := []ui.Rect{}
+		for _, b := range g.Picker.Buttons() {
+			out = append(out, b.Rect)
+		}
+		return out
+	}
+	return []ui.Rect{g.Title.Panel()}
+}
+
+func overlaps(a, b ui.Rect) bool {
+	return a.X < b.X+b.W && b.X < a.X+a.W && a.Y < b.Y+b.H && b.Y < a.Y+a.H
 }
 
 func (g *Game) drawFade(dst *ebiten.Image) {

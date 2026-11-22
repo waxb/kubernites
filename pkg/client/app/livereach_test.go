@@ -98,6 +98,13 @@ func TestTheHutCardsReachOrdersRunTheirCommandsInTheStone(t *testing.T) {
 	closeStone(t, rig)
 	rig.select_(sel)
 	rig.key(hud.Input{Ctrl: true, Control: true, Keys: []ebiten.Key{ebiten.KeyF}})
+	if form, open := s.Hud.OrderOpen(); !open || form.Go != "FORWARD [Y]" || s.Hud.StoneRunning() {
+		t.Fatalf("CTRL-F at DANGEROUSLY SEAMLESS should ask once: %+v open %v", form, open)
+	}
+	for range hud.AskSeenFrames {
+		rig.key(hud.Input{MX: -10, MY: -10})
+	}
+	rig.key(hud.Input{MX: -10, MY: -10, Keys: []ebiten.Key{ebiten.KeyY}})
 	if spec, _ := s.spec("port-forward"); spec.stoneRun {
 		stoneEnds(t, s)
 		frames(t, s, "the forward is listed", func() bool { return len(s.Hud.LiveCard().Forwards) == 1 })

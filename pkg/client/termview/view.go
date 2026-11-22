@@ -1,7 +1,10 @@
 package termview
 
 import (
+	"errors"
+	"fmt"
 	"image/color"
+	"strings"
 	"sync"
 
 	uv "github.com/charmbracelet/ultraviolet"
@@ -11,11 +14,32 @@ import (
 type View struct {
 	mu     sync.Mutex
 	writes sync.Mutex
-	in     filter
+	in     *filter
 	emu    *vt.Emulator
 	send   func([]byte)
 	closed bool
+	broken error
 	done   chan struct{}
+}
+
+var ErrCannotDraw = errors.New("the Stone's terminal could not draw what the container sent, so the session ended")
+
+func (v *View) guard(fn func()) {
+	defer func() {
+		if p := recover(); p != nil && v.broken == nil {
+			v.broken = fmt.Errorf("%w (%v)", ErrCannotDraw, p)
+		}
+	}()
+	if v.closed || v.broken != nil {
+		return
+	}
+	fn()
+}
+
+func (v *View) Broken() error {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	return v.broken
 }
 
 type Cell struct {
@@ -39,7 +63,7 @@ type Key struct {
 }
 
 func New(cols, rows int, send func([]byte)) *View {
-	v := &View{emu: vt.NewEmulator(max(cols, 1), max(rows, 1)), send: send, done: make(chan struct{})}
+	v := &View{in: newFilter(), emu: vt.NewEmulator(max(cols, 1), max(rows, 1)), send: send, done: make(chan struct{})}
 	v.emu.SetScrollbackSize(1)
 	go v.pump()
 	return v
@@ -62,14 +86,18 @@ func (v *View) pump() {
 func (v *View) Write(p []byte) (int, error) {
 	v.writes.Lock()
 	defer v.writes.Unlock()
+	if err := v.Broken(); err != nil {
+		return 0, err
+	}
 	cols, rows := v.Size()
-	v.in.feed(p, cols, rows, func(piece []byte) {
+	v.in.feed(p, cols, rows, func(piece []byte, _ int) {
 		v.mu.Lock()
 		defer v.mu.Unlock()
-		if !v.closed {
-			v.emu.Write(piece)
-		}
+		v.guard(func() { v.emu.Write(piece) })
 	})
+	if err := v.Broken(); err != nil {
+		return 0, err
+	}
 	return len(p), nil
 }
 
@@ -79,7 +107,7 @@ func (v *View) Resize(cols, rows int) {
 	if v.closed || cols == v.emu.Width() && rows == v.emu.Height() {
 		return
 	}
-	v.emu.Resize(max(cols, 1), max(rows, 1))
+	v.guard(func() { v.emu.Resize(max(cols, 1), max(rows, 1)) })
 }
 
 func (v *View) Size() (int, int) {
@@ -107,7 +135,7 @@ func (v *View) Row(y int) []Cell {
 	w := v.emu.Width()
 	out := make([]Cell, w)
 	for x := 0; x < w; x++ {
-		c := v.emu.CellAt(x, y)
+		c := v.cellAt(x, y)
 		if c == nil {
 			out[x].Text = " "
 			continue
@@ -134,13 +162,22 @@ func (v *View) Text() []string {
 	_, rows := v.Size()
 	out := make([]string, rows)
 	for y := range rows {
-		line := ""
+		var line strings.Builder
 		for _, c := range v.Row(y) {
-			line += c.Text
+			line.WriteString(c.Text)
 		}
-		out[y] = line
+		out[y] = line.String()
 	}
 	return out
+}
+
+func (v *View) cellAt(x, y int) (c *uv.Cell) {
+	defer func() {
+		if recover() != nil {
+			c = nil
+		}
+	}()
+	return v.emu.CellAt(x, y)
 }
 
 func rgba(c color.Color) color.RGBA {
@@ -184,10 +221,10 @@ func (v *View) Key(k Key) {
 		return
 	}
 	if k.Name == "tab" && k.Shift {
-		v.emu.SendText("\x1b[Z")
+		v.guard(func() { v.emu.SendText("\x1b[Z") })
 		return
 	}
-	v.emu.SendKey(uv.KeyPressEvent{Code: code, Mod: mod})
+	v.guard(func() { v.emu.SendKey(uv.KeyPressEvent{Code: code, Mod: mod}) })
 }
 
 func (v *View) Type(text string) {
@@ -196,7 +233,7 @@ func (v *View) Type(text string) {
 	if v.closed || text == "" {
 		return
 	}
-	v.emu.SendText(text)
+	v.guard(func() { v.emu.SendText(text) })
 }
 
 func (v *View) Close() {

@@ -63,7 +63,7 @@ func (h *HUD) Press(id string, f Frame) []Intent {
 	}
 	if id == menuLiveChoices {
 		h.OverlayID = OverlayLiveChoices
-		return []Intent{click}
+		return []Intent{click, {Kind: IntentLiveChoices, Command: "open"}}
 	}
 	if id == DawnMore {
 		h.Dawn.More = !h.Dawn.More

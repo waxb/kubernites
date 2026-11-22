@@ -43,7 +43,7 @@ func StoryNaming() bool {
 }
 
 func Name(text string) string {
-	if s := current.Load(); s != nil {
+	if s := current.Load(); s != nil && !isVerbatim(text) {
 		return s.name(text)
 	}
 	return text

@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math/rand/v2"
 	"strconv"
@@ -51,11 +52,12 @@ type orderRun struct {
 type drainRun struct {
 	node    string
 	stop    context.CancelFunc
+	stopped bool
 	plan    write.Drain
 	done    int
 	blocked string
 	budget  string
-	failed  []string
+	failed  []drainFailure
 	over    bool
 	err     string
 }
@@ -77,13 +79,18 @@ type liveWriter struct {
 	seq     int
 	hints   bool
 	shown   string
+	ctx     context.Context
+	cancel  context.CancelFunc
+	running sync.WaitGroup
+	every   time.Duration
 }
 
 func newLiveWriter(g *write.Gate, dir string, now func() time.Time, pass func(write.Class)) *liveWriter {
 	if g == nil {
 		return nil
 	}
-	w := &liveWriter{gate: g, level: g.Level(), reviews: map[write.Access]*accessState{}, now: now, pass: pass}
+	w := &liveWriter{gate: g, level: g.Level(), reviews: map[write.Access]*accessState{}, now: now, pass: pass, every: write.DrainEvery}
+	w.ctx, w.cancel = context.WithCancel(context.Background())
 	w.ledger = write.OpenLedger(dir, g.Context())
 	if dir == "" {
 		w.ledger = nil
@@ -149,7 +156,24 @@ func (w *liveWriter) spawn(fn func()) {
 		fn()
 		return
 	}
-	go fn()
+	w.running.Add(1)
+	go func() {
+		defer w.running.Done()
+		fn()
+	}()
+}
+
+func (w *liveWriter) end(limit time.Duration) {
+	w.cancel()
+	done := make(chan struct{})
+	go func() {
+		w.running.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(limit):
+	}
 }
 
 func (s *Session) review(a write.Access) *accessState {
@@ -160,7 +184,7 @@ func (s *Session) review(a write.Access) *accessState {
 	st := &accessState{}
 	w.reviews[a] = st
 	w.spawn(func() {
-		ctx, cancel := context.WithTimeout(context.Background(), liveSendTimeout)
+		ctx, cancel := context.WithTimeout(w.ctx, liveSendTimeout)
 		defer cancel()
 		v := w.gate.Review(ctx, a)
 		w.later(func(*Session) { st.done, st.v = true, v })
@@ -207,18 +231,25 @@ func (s *Session) liveOrders() []hud.LiveOrder {
 				if reason == "" {
 					reason = "no rule allows " + sp.access.Verb + " on " + accessName(sp.access)
 				}
-				o.Disabled, o.Why, o.Tip = true, refusedWhy, ui.Bridge("The Chancery refuses these credentials: ", "The API server refuses these credentials: ")+reason
+				o.Disabled, o.Why, o.Tip = true, refusedWhy, refusedTip(sp.verb, reason)
 			case sp.off != "":
 				o.Disabled, o.Why, o.Tip = true, sp.offWhy, sp.off
 			case !st.done:
 				o.Disabled, o.Why, o.Tip = true, askingWhy, sp.tip+"\n"+ui.Bridge("Asking the Chancery whether these credentials may.", "Asking the API server whether these credentials may (SelfSubjectAccessReview).")
 			case st.v.Err != nil:
-				o.Tip = sp.tip + "\nThe access check could not be asked: " + st.v.Err.Error()
+				o.Tip = clusterSaidOr(sp.tip+"\nThe Chancery could not be asked whether these credentials may: switch NAMES to read why.", sp.tip+"\nThe access check could not be asked: ", st.v.Err.Error())
 			}
 		}
 		out = append(out, o)
 	}
 	return out
+}
+
+func refusedTip(verb, reason string) string {
+	if !ui.Naming() {
+		return "The Chancery refuses these credentials: they may not " + verb + ". Switch NAMES to read its own words."
+	}
+	return clusterSaid("The API server refuses these credentials: ", reason)
 }
 
 func accessName(a write.Access) string {
@@ -258,11 +289,11 @@ func (s *Session) startOrder(key string) []sound.SFX {
 			return []sound.SFX{sound.SFXError}
 		}
 	}
-	if sp.stone != "" {
+	w := s.Writer
+	if sp.stone != "" && !(sp.askFirst && w != nil && w.level == write.Seamless) {
 		s.runStoneOrder(sp)
 		return []sound.SFX{sound.SFXClick}
 	}
-	w := s.Writer
 	if sp.running && w.drain != nil {
 		w.seq++
 		w.run = &orderRun{id: w.seq, spec: sp, stage: stageDraining}
@@ -296,6 +327,7 @@ func (s *Session) liveScroll(it hud.Intent) []sound.SFX {
 		return []sound.SFX{sound.SFXClick}
 	case hud.ScrollStop:
 		if w.drain != nil && w.drain.stop != nil {
+			w.drain.stopped = true
 			w.drain.stop()
 		}
 		return []sound.SFX{sound.SFXClick}
@@ -311,6 +343,12 @@ func (s *Session) advanceOrder() []sound.SFX {
 	run := w.run
 	switch run.stage {
 	case stageInput:
+		if run.spec.stone != "" {
+			w.run = nil
+			s.Hud.CloseOrder()
+			s.runStoneOrder(run.spec)
+			return []sound.SFX{sound.SFXClick}
+		}
 		if err := s.buildOrder(run); err != nil {
 			run.note, run.bad = err.Error(), true
 			s.showOrder()
@@ -379,17 +417,17 @@ func (s *Session) previewOrder(run *orderRun) {
 	if run.drain != nil {
 		d := *run.drain
 		w.spawn(func() {
-			ctx, cancel := context.WithTimeout(context.Background(), liveSendTimeout)
+			ctx, cancel := context.WithTimeout(w.ctx, liveSendTimeout)
 			defer cancel()
 			var lines []string
 			bad, noDry := false, false
 			if d.Cordon != nil {
-				ans, fields := w.gate.Preview(ctx, *d.Cordon)
+				ans, fields := previewSafely(ctx, w.gate, *d.Cordon)
 				lines = append(lines, previewLine("cordon "+d.Node, ans, fields))
 				bad, noDry = bad || !ans.OK(), noDry || ans.NoDryRun
 			}
 			for _, o := range d.Evict {
-				ans, _ := w.gate.Preview(ctx, o)
+				ans, _ := previewSafely(ctx, w.gate, o)
 				lines = append(lines, previewLine("evict "+o.Target.Namespace+"/"+o.Target.Name, ans, nil))
 				noDry = noDry || ans.NoDryRun
 			}
@@ -399,15 +437,24 @@ func (s *Session) previewOrder(run *orderRun) {
 	}
 	o := run.order
 	w.spawn(func() {
-		ctx, cancel := context.WithTimeout(context.Background(), liveSendTimeout)
+		ctx, cancel := context.WithTimeout(w.ctx, liveSendTimeout)
 		defer cancel()
-		ans, fields := w.gate.Preview(ctx, o)
+		ans, fields := previewSafely(ctx, w.gate, o)
 		note := ""
 		if !ans.OK() {
 			note = ans.Text()
 		}
 		w.later(func(s *Session) { s.previewed(id, fields, nil, !ans.OK() && !ans.NoDryRun, ans.NoDryRun, note) })
 	})
+}
+
+func previewSafely(ctx context.Context, g *write.Gate, o write.Order) (ans write.Answer, fields []write.Field) {
+	defer func() {
+		if p := recover(); p != nil {
+			ans, fields = write.Answer{Err: fmt.Errorf("the preview failed, so nothing was sent: %v", p)}, nil
+		}
+	}()
+	return g.Preview(ctx, o)
 }
 
 func previewLine(what string, ans write.Answer, fields []write.Field) string {
@@ -419,7 +466,7 @@ func previewLine(what string, ans write.Answer, fields []write.Field) string {
 	case ans.Blocked():
 		return what + ": blocked now, the drain waits and retries: " + strings.Join(ans.Causes, "; ")
 	}
-	return what + ": " + ans.Text()
+	return clusterSaid(what+": ", ans.Text())
 }
 
 func orNone(v string) string {
@@ -428,6 +475,8 @@ func orNone(v string) string {
 	}
 	return v
 }
+
+const noPreviewStory = "The Chancery cannot preview this: switch NAMES to read why."
 
 func (s *Session) previewed(id int, fields []write.Field, lines []string, bad, noDry bool, note string) {
 	w := s.Writer
@@ -439,11 +488,11 @@ func (s *Session) previewed(id int, fields []write.Field, lines []string, bad, n
 	switch {
 	case noDry && !w.gate.Passed(write.Unpreviewed):
 		run.stage, run.need = stageClass, write.Unpreviewed
-		run.note, run.bad = note, true
+		run.note, run.bad = clusterSaidOr(noPreviewStory, "", note), true
 	case noDry:
-		run.stage, run.note, run.bad = stagePreview, note, true
+		run.stage, run.note, run.bad = stagePreview, clusterSaidOr(noPreviewStory, "", note), true
 	case bad:
-		run.stage, run.note, run.bad = stagePreview, ui.Bridge("The Chancery refused the preview: ", "The server refused the dry run: ")+note, true
+		run.stage, run.note, run.bad = stagePreview, clusterSaid(ui.Bridge("The Chancery refused the preview: ", "The server refused the dry run: "), note), true
 	default:
 		run.stage, run.note, run.bad = stagePreview, "", false
 	}
@@ -454,11 +503,13 @@ func (s *Session) confirmOrder() []sound.SFX {
 	w := s.Writer
 	run := w.run
 	if run.drain != nil {
+		if s.drainBusy() {
+			return []sound.SFX{sound.SFXError}
+		}
 		w.gate.IssueDrain(*run.drain)
 		return s.startDrain(*run.drain)
 	}
-	w.gate.Issue(run.order.Request)
-	return s.sendOrder()
+	return s.sendWith(func(ctx context.Context, o write.Order) write.Answer { return w.gate.SendConfirmed(ctx, o) })
 }
 
 func (s *Session) sendOrder() []sound.SFX {
@@ -467,15 +518,21 @@ func (s *Session) sendOrder() []sound.SFX {
 	if run.drain != nil {
 		return s.startDrain(*run.drain)
 	}
+	return s.sendWith(w.gate.Send)
+}
+
+func (s *Session) sendWith(send func(context.Context, write.Order) write.Answer) []sound.SFX {
+	w := s.Writer
+	run := w.run
 	run.stage = stageSending
 	if s.asks(run.spec) || len(run.spec.inputs) > 0 || w.level == write.Writes {
 		s.showOrder()
 	}
 	o, id, values := run.order, run.id, run.values
 	w.spawn(func() {
-		ctx, cancel := context.WithTimeout(context.Background(), liveSendTimeout)
+		ctx, cancel := context.WithTimeout(w.ctx, liveSendTimeout)
 		defer cancel()
-		ans := w.gate.Send(ctx, o)
+		ans := send(ctx, o)
 		w.later(func(s *Session) { s.sent(id, o, values, ans) })
 	})
 	return []sound.SFX{sound.SFXClick}
@@ -501,13 +558,13 @@ func (s *Session) sent(id int, o write.Order, values []string, ans write.Answer)
 		}
 	default:
 		if mine {
-			run.stage, run.note, run.bad = stagePreview, ans.Text(), true
+			run.stage, run.note, run.bad = stagePreview, clusterSaid("", ans.Text()), true
 			if w.level == write.Seamless {
 				run.stage = stageInput
 			}
 			s.showOrder()
 		}
-		s.Hud.Toast(strings.ToUpper(o.Verb)+": "+ans.Text(), true)
+		s.Hud.Toast(clusterSaid(strings.ToUpper(o.Verb)+": ", ans.Text()), true)
 	}
 }
 
@@ -535,10 +592,14 @@ func (l ledgerLine) text() string {
 	if l.earlier {
 		verb = ui.Bridge("EARLIER", "EARLIER WRITE")
 	}
+	head := l.at.Format("15:04") + " " + verb + " " + obj + ": "
 	if l.ended != "" {
-		return l.at.Format("15:04") + " " + verb + " " + obj + ": " + l.ended
+		return head + l.ended
 	}
-	return l.at.Format("15:04") + " " + verb + " " + obj + ": " + answerWords(l.code, l.answer)
+	if words, ok := codeWords(l.code, l.answer); ok {
+		return head + words
+	}
+	return clusterSaid(head, write.Mask(l.answer))
 }
 
 var storyVerbs = map[string]string{
@@ -553,18 +614,18 @@ func verbWords(verb string) string {
 	return kube
 }
 
-func answerWords(code int, raw string) string {
+func codeWords(code int, raw string) (string, bool) {
 	switch {
 	case code >= 200 && code < 300:
-		return ui.Bridge("done", "OK")
+		return ui.Bridge("done", "OK"), true
 	case code == 409:
-		return ui.Bridge("changed since it was drawn", "409 Conflict")
+		return ui.Bridge("changed since it was drawn", "409 Conflict"), true
 	case code == 429:
-		return ui.Bridge("the Quorum holds it", "429 "+raw)
+		return ui.Bridge("the Quorum holds it", "429 "+raw), true
 	case code == 404:
-		return ui.Bridge("already gone", "404 Not Found")
+		return ui.Bridge("already gone", "404 Not Found"), true
 	}
-	return write.Mask(raw)
+	return "", false
 }
 
 func (s *Session) recordWrite(command, verb string, target write.Ref, ans write.Answer) {
@@ -613,9 +674,23 @@ func (s *Session) RecordWrite(e write.Entry) {
 	}
 }
 
+func (s *Session) drainBusy() bool {
+	w := s.Writer
+	if w.drain == nil || w.drain.over {
+		return false
+	}
+	s.Hud.Toast(oneDrain(w.drain.node), true)
+	w.run = nil
+	s.Hud.CloseOrder()
+	return true
+}
+
 func (s *Session) startDrain(d write.Drain) []sound.SFX {
 	w := s.Writer
-	ctx, stop := context.WithCancel(context.Background())
+	if s.drainBusy() {
+		return []sound.SFX{sound.SFXError}
+	}
+	ctx, stop := context.WithCancel(w.ctx)
 	dr := &drainRun{node: d.Node, stop: stop, plan: d}
 	w.drain = dr
 	if w.run != nil {
@@ -625,7 +700,7 @@ func (s *Session) startDrain(d write.Drain) []sound.SFX {
 		w.run = &orderRun{id: w.seq, stage: stageDraining}
 	}
 	s.showOrder()
-	every := write.DrainEvery
+	every := w.every
 	if w.sync {
 		every = time.Millisecond
 	}
@@ -640,6 +715,9 @@ func (s *Session) startDrain(d write.Drain) []sound.SFX {
 			}
 			if ctx.Err() != nil {
 				dr.err = "STOPPED: nothing more is evicted"
+				if !dr.stopped {
+					dr.err = "STOPPED: the realm was left or the window closed, so nothing more is evicted"
+				}
 			}
 			s.recordDrainEnd(dr)
 			s.showOrder()
@@ -649,6 +727,18 @@ func (s *Session) startDrain(d write.Drain) []sound.SFX {
 }
 
 func (s *Session) drained(dr *drainRun, r write.DrainReport) {
+	if r.Cordon != "" {
+		ans := write.Answer{Code: r.Code}
+		if r.Failed != "" {
+			ans.Message = r.Failed
+			if ans.Code == 0 {
+				ans.Err = errors.New(r.Failed)
+			}
+		}
+		s.recordWrite("", write.OrderCordon, write.Ref{GVR: write.Nodes, Kind: "Node", Name: r.Cordon}, ans)
+		s.showOrder()
+		return
+	}
 	ans := write.Answer{Code: 201}
 	switch {
 	case r.Gone:
@@ -670,12 +760,60 @@ func (s *Session) drained(dr *drainRun, r write.DrainReport) {
 		dr.blocked = ui.Bridge(r.Hut+" waits: its Quorum lets no more of its crew leave now", r.Hut+": "+r.Blocked)
 		dr.budget = s.budgetLine(r.Hut)
 	case r.Failed != "":
-		dr.failed = append(dr.failed, r.Hut+": "+r.Failed)
+		dr.failed = append(dr.failed, drainFailure{hut: r.Hut, why: r.Failed})
 	}
 	s.showOrder()
 }
 
+type drainFailure struct {
+	hut, why string
+}
+
+func (f drainFailure) shown() string {
+	return clusterSaid("FAILED: "+f.hut+": ", f.why)
+}
+
+func drainEndWords(dr *drainRun) (string, string) {
+	why, story := "over", "over"
+	switch {
+	case dr.err != "" && strings.HasPrefix(dr.err, "STOPPED") && dr.stopped:
+		why, story = "stopped by STOP", "stopped by STOP"
+	case dr.err != "" && strings.HasPrefix(dr.err, "STOPPED"):
+		why, story = "stopped by leaving the realm or closing the window", "stopped by leaving the realm"
+	case dr.err != "":
+		why, story = "ended: "+dr.err, "ended"
+	}
+	ended := fmt.Sprintf("drain %s: %d of %d Pods evicted", why, dr.done, len(dr.plan.Evict))
+	shown := fmt.Sprintf(ui.Bridge("DRAIN %s: %d of %d huts sent away", "drain %s: %d of %d Pods evicted"), ui.Bridge(story, why), dr.done, len(dr.plan.Evict))
+	if n := len(dr.failed); n > 0 {
+		ended += fmt.Sprintf(", %d failed", n)
+		shown += fmt.Sprintf(ui.Bridge(", %d could not leave", ", %d failed"), n)
+	}
+	switch {
+	case story != "ended":
+	case ui.Naming():
+		shown = ui.Verbatim(shown)
+	default:
+		shown += ", switch NAMES to read why"
+	}
+	return ended, shown
+}
+
 func (s *Session) recordDrainEnd(dr *drainRun) {
+	if w := s.Writer; w != nil {
+		ended, shown := drainEndWords(dr)
+		target := write.Ref{GVR: write.Nodes, Kind: "Node", Name: dr.node}
+		e := write.Entry{At: w.now().UTC(), Context: w.gate.Context().Name, Level: w.level.String(), Order: write.DrainCommand(dr.node), Object: target.String(), Answer: ended, Ended: ended}
+		if err := w.ledger.Append(e); err != nil {
+			s.Hud.Toast("The ledger file could not be written: "+err.Error(), true)
+		}
+		line := ledgerLine{at: e.At, shownVerb: "DRAIN", target: target, ended: shown}
+		w.entries = append(w.entries, line)
+		if len(w.entries) > ledgerShown {
+			w.entries = w.entries[len(w.entries)-ledgerShown:]
+		}
+		s.Echoes = Chronicled(s.Echoes, "WRITE "+e.Level+" "+line.text(), s.echoClock())
+	}
 	switch {
 	case dr.err != "":
 		s.Hud.Toast("DRAIN "+dr.node+": "+dr.err, true)

@@ -13,10 +13,12 @@ type Title struct {
 	HasSave  bool
 	Note     string
 	Version  string
+	Settings TitleSettings
 	font     ui.Font
 	hover    Button
 	hovered  bool
 	held     int
+	settings bool
 }
 
 const (
@@ -29,7 +31,7 @@ const (
 	titleTipW     = 230
 	titleTipGap   = 24
 	titleTipPad   = 6
-	titleTipLines = 4
+	titleTipLines = 8
 )
 
 type titleChoice struct {
@@ -41,6 +43,7 @@ func (t *Title) choices() []titleChoice {
 	if t.LiveOnly {
 		return []titleChoice{
 			{id: "title:live", label: liveTitle, caption: LiveCaption, keys: "3", key: ebiten.Key3},
+			{id: TitleSettingsID, label: "SETTINGS", caption: titleSettingsCaption},
 			{id: "title:quit", label: "QUIT"},
 		}
 	}
@@ -58,13 +61,16 @@ func (t *Title) choices() []titleChoice {
 func titleLeft() int { return Width/2 - titleButtonW/2 }
 
 func (c titleChoice) tip() string {
-	if c.caption == "" {
-		return ""
+	if c.caption == "" || c.keys == "" {
+		return c.caption
 	}
 	return c.caption + " [" + c.keys + "]"
 }
 
 func (t *Title) Buttons() []Button {
+	if t.settings {
+		return t.settingsButtons()
+	}
 	out := []Button{}
 	y := titleTop
 	for _, c := range t.choices() {
@@ -86,6 +92,9 @@ func (t *Title) Update(in Input) []Intent {
 		t.held = 1
 	}
 	t.hover, t.hovered = hover, hovered
+	if t.settings {
+		return t.updateSettings(in)
+	}
 	switch {
 	case in.Pressed(ebiten.KeyEnter) && t.HasSave && !t.LiveOnly:
 		return []Intent{{Kind: IntentLoad}}
@@ -99,6 +108,10 @@ func (t *Title) Update(in Input) []Intent {
 	}
 	if !in.Click || !t.hovered || t.hover.Disabled {
 		return nil
+	}
+	if t.hover.ID == TitleSettingsID {
+		t.openSettings(true)
+		return []Intent{titleClick}
 	}
 	if in, ok := simpleIntents[t.hover.ID]; ok {
 		return []Intent{in}
@@ -118,11 +131,13 @@ func (t *Title) Draw(dst *ebiten.Image) {
 		t.font.DrawCentered(dst, "RAISE A REALM. LEARN KUBERNETES BY RULING IT.", ui.Rect{X: 0, Y: 108, W: Width, H: 10}, 1, ui.Palette.Cream)
 	}
 	buttons := t.Buttons()
-	last := buttons[len(buttons)-1].Rect
-	panel := ui.Rect{X: titleLeft() - titlePad, Y: titleTop - 12, W: titleButtonW + 2*titlePad, H: last.Y + last.H + 12 - (titleTop - 12)}
+	panel := t.Panel()
 	ui.Fill(dst, panel.Offset(2, 3), color.RGBA{8, 11, 12, 180})
 	ui.Fill(dst, panel, ui.Tint(ui.Palette.Console, 235))
 	ui.Stroke(dst, panel, ui.Palette.Gold)
+	if t.settings {
+		t.font.DrawCentered(dst, "SETTINGS", ui.Rect{X: panel.X, Y: titleSettingsHead, W: panel.W, H: 14}, 2, ui.Palette.Gold)
+	}
 	for _, b := range buttons {
 		state := ui.ButtonState{Hovered: t.hovered && t.hover.ID == b.ID, Disabled: b.Disabled}
 		ui.Button(dst, titleFont, b.Rect, b.Label, state)
@@ -135,6 +150,16 @@ func (t *Title) Draw(dst *ebiten.Image) {
 		t.font.Draw(dst, t.Version, titleVersionX, Height-20, 1, ui.Palette.TextDim)
 	}
 	ui.InRegion("tooltip", func() { t.drawTip(dst) })
+}
+
+func (t *Title) Panel() ui.Rect {
+	buttons := t.Buttons()
+	last := buttons[len(buttons)-1].Rect
+	top := titleTop - 12
+	if t.settings {
+		top = titleSettingsHead - 10
+	}
+	return ui.Rect{X: titleLeft() - titlePad, Y: top, W: titleButtonW + 2*titlePad, H: last.Y + last.H + 12 - top}
 }
 
 func (t *Title) drawTip(dst *ebiten.Image) {

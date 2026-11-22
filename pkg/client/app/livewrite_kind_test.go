@@ -118,7 +118,7 @@ func connectFile(t *testing.T, kubeconfig, level string, classes ...write.Class)
 	}
 	if len(classes) > 0 {
 		c := g.Picker.Contexts[g.Picker.Chosen]
-		g.choices.Keep(write.Remembered{Context: write.Context{Name: c.Name, Server: c.Server, User: c.User}, Level: write.Seamless, Warned: write.Seamless, Classes: classes})
+		g.choices.Keep(write.Remembered{Context: write.Context{Name: c.Name, Server: c.Server, User: c.User, Identity: c.Identity}, Level: write.Seamless, Warned: write.Seamless, Classes: classes})
 		g.saveChoices()
 	}
 	rig.press(t, "live:choose")

@@ -46,6 +46,10 @@ func MaskSecrets(text string, reveal Reveal) (string, bool) {
 	return string(out), true
 }
 
+func MaskObject(obj map[string]any) bool {
+	return maskTree(obj, nil)
+}
+
 func maskTree(node any, reveal Reveal) bool {
 	obj, ok := node.(map[string]any)
 	if !ok {

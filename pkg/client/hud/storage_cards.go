@@ -117,6 +117,13 @@ func reclaimStory(policy string) string {
 
 func VaultActions(s view.Structure, f Frame) []CardAction {
 	name := s.Object.Name
+	if s.Object.Kind == "PersistentVolumeClaim" {
+		ref := name + nsFlag(s.Object.Namespace)
+		return []CardAction{
+			{Key: KeyDescribe, Label: "DESCRIBE", Command: "describe pvc " + ref, Details: DetailDescribe, Tip: ui.Bridge("kubectl describe: the Deed this Vault keeps, its Vault and who holds it", "kubectl describe persistentvolumeclaim")},
+			{Key: KeyGet, Label: "GET", Command: "get pvc " + ref, Details: detailOutput, Tip: ui.Bridge("kubectl get: the Deed in one line", "kubectl get persistentvolumeclaim")},
+		}
+	}
 	out := []CardAction{
 		{Key: KeyDescribe, Label: "DESCRIBE", Command: "describe pv " + name, Details: DetailDescribe, Tip: ui.Bridge("kubectl describe: the Vault's shelves, its isle and the Deed that holds it", "kubectl describe persistentvolume")},
 		{Key: KeyGet, Label: "GET", Command: "get pv " + name, Details: detailOutput, Tip: ui.Bridge("kubectl get: the Vault in one line", "kubectl get persistentvolume")},

@@ -14,6 +14,8 @@ import (
 	"time"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
+	"github.com/waxb/kubernites/pkg/live/write"
 )
 
 const (
@@ -145,7 +147,9 @@ func (r *Realm) StartWatching() {
 
 func (r *Realm) Stop() {
 	r.mu.Lock()
-	r.stopped = true
+	if !r.stopped {
+		r.stopped, r.leftAt = true, r.now()
+	}
 	if r.cancel != nil {
 		r.cancel()
 	}
@@ -357,7 +361,7 @@ func (r *Realm) failed(ctx context.Context, name string, err error) {
 	if h.failing.IsZero() {
 		h.failing = r.wire.now()
 	}
-	h.err = err.Error()
+	h.err = write.Redact(err.Error())
 	r.health[name] = h
 }
 
@@ -370,6 +374,9 @@ func (r *Realm) healthy(name string) {
 func (r *Realm) Freshness() Freshness {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if r.stopped {
+		return Freshness{StaleSince: r.leftAt, Why: realmLeft}
+	}
 	if r.wire == nil {
 		return Freshness{Watching: r.replayed, StaleSince: r.staleAt, Why: r.staleWhy}
 	}

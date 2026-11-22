@@ -32,6 +32,7 @@ func (g *Game) settledSession(r client.Realm) *Session {
 		s.Writer = g.writerFor(r)
 		s.hints = g.Settings.LiveHints
 		s.goLive(lv)
+		s.zoomClosest()
 	}
 	return s
 }

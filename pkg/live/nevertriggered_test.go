@@ -13,7 +13,7 @@ import (
 
 var liveClosure = []string{
 	"github.com/waxb/kubernites/pkg/kubectl", "github.com/waxb/kubernites/pkg/lexicon", "github.com/waxb/kubernites/pkg/live",
-	"github.com/waxb/kubernites/pkg/live/kubectltree", "github.com/waxb/kubernites/pkg/live/write", "github.com/waxb/kubernites/pkg/sim/clock", "github.com/waxb/kubernites/pkg/sim/limitranger", "github.com/waxb/kubernites/pkg/sim/podutil",
+	"github.com/waxb/kubernites/pkg/live/forwarding", "github.com/waxb/kubernites/pkg/live/kubectltree", "github.com/waxb/kubernites/pkg/live/write", "github.com/waxb/kubernites/pkg/sim/clock", "github.com/waxb/kubernites/pkg/sim/limitranger", "github.com/waxb/kubernites/pkg/sim/podutil",
 	"github.com/waxb/kubernites/pkg/sim/rolloututil", "github.com/waxb/kubernites/pkg/sim/store", "github.com/waxb/kubernites/pkg/sim/volumeutil",
 	"github.com/waxb/kubernites/pkg/soulstone", "github.com/waxb/kubernites/pkg/view",
 }

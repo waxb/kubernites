@@ -270,7 +270,7 @@ func TestOnlyTheConfirmedChoiceBuildsTheGateAndOnlyCONFIRMIssuesATicket(t *testi
 				if id, ok := sel.X.(*ast.Ident); ok && id.Name == name && sel.Sel.Name == "New" && buildsTheGate[sf.rel] != fn {
 					t.Errorf("%s builds the write gate in %s: only %v may, from the picker's confirmed choice", where(x), fn, buildsTheGate)
 				}
-				if strings.HasPrefix(sel.Sel.Name, "Issue") && issuesTickets[sf.rel] != fn {
+				if (strings.HasPrefix(sel.Sel.Name, "Issue") || sel.Sel.Name == "SendConfirmed") && issuesTickets[sf.rel] != fn {
 					t.Errorf("%s issues a ticket in %s: only CONFIRM may (%v)", where(x), fn, issuesTickets)
 				}
 				if sel.Sel.Name == "Pass" && !slices.Contains(passesClasses[sf.rel], fn) {

@@ -75,7 +75,10 @@ func StructureCard(s view.Structure, f Frame) Card {
 	if s.Kind == view.StructVault {
 		c.Portrait = vaultPortrait(s, f)
 	}
-	if s.Object.Kind != "" {
+	switch {
+	case s.Object.Name == "" && s.Object.Resource != "":
+		c.K8s = s.Object.Resource
+	case s.Object.Kind != "":
 		c.K8s = s.Object.Kind + "/" + s.Object.Name
 	}
 	switch s.State {
@@ -256,6 +259,9 @@ func SplitCardHead(title, ref string, chars int) (string, string) {
 		}
 	}
 	if !fits(title) {
+		if kind, _, found := strings.Cut(title, " OF "); found && fits(kind) {
+			return kind, ref
+		}
 		if kind, _, found := strings.Cut(title, " "); found {
 			title = kind
 		}

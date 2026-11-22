@@ -61,6 +61,7 @@ type ObjectRef struct {
 	Kind      string `json:"kind"`
 	Namespace string `json:"namespace,omitempty"`
 	Name      string `json:"name"`
+	Resource  string `json:"resource,omitempty"`
 }
 
 type Structure struct {

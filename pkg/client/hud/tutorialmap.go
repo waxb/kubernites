@@ -302,6 +302,17 @@ func (m *TutorialMap) Buttons() []Button {
 	return out
 }
 
+func (m *TutorialMap) Shown() []ui.Rect {
+	out := []ui.Rect{mapBack}
+	for _, s := range m.Stops() {
+		out = append(out, StopRect(s))
+	}
+	if m.card {
+		out = append(out, m.cardRect())
+	}
+	return out
+}
+
 func (m *TutorialMap) cardButtons() []Button {
 	s, ok := m.stop(m.focus)
 	if !ok {

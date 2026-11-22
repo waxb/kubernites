@@ -74,6 +74,8 @@ func ClassTitle(c Class) string {
 		return "destroying more than one thing"
 	case Unpreviewed:
 		return "changing without a preview"
+	case Tokens:
+		return "minting a token"
 	}
 	return string(c)
 }

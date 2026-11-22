@@ -47,12 +47,34 @@ func targetOf(sel Selection) (target, bool) {
 		return crewDetailTarget(sel)
 	case "structure":
 		o := sel.Structure.Object
-		if o.Kind == "" {
+		switch {
+		case o.Kind == "":
 			return target{}, false
+		case o.Name == "" && o.Resource != "":
+			return target{kind: o.Resource, namespace: o.Namespace}, true
 		}
 		return target{kind: kubectlKind(o.Kind), namespace: o.Namespace, name: o.Name, restarts: int(sel.Pod.Restarts)}, true
 	}
 	return target{}, false
+}
+
+const apiServerKind = "APIServer"
+
+func apiServerCommands(tab string) []string {
+	switch tab {
+	case DetailYAML:
+		return []string{"version -o yaml"}
+	case DetailExplain, DetailLogs:
+		return nil
+	}
+	return []string{"cluster-info"}
+}
+
+func (t target) ref() string {
+	if t.name == "" {
+		return t.kind + nsFlag(t.namespace)
+	}
+	return t.kind + " " + t.name + nsFlag(t.namespace)
 }
 
 var shortKinds = map[string]string{"HorizontalPodAutoscaler": "hpa"}
@@ -72,13 +94,16 @@ func nsFlag(ns string) string {
 }
 
 func DetailCommands(sel Selection, tab string) []string {
+	if sel.Kind == "structure" && sel.Structure.Object.Kind == apiServerKind {
+		return apiServerCommands(tab)
+	}
 	t, ok := targetOf(sel)
 	if !ok {
 		return nil
 	}
 	switch tab {
 	case DetailYAML:
-		return []string{"get " + t.kind + " " + t.name + nsFlag(t.namespace) + " -o yaml"}
+		return []string{"get " + t.ref() + " -o yaml"}
 	case DetailExplain:
 		return []string{"explain " + t.kind}
 	case DetailLogs:
@@ -91,7 +116,7 @@ func DetailCommands(sel Selection, tab string) []string {
 		}
 		return []string{base}
 	}
-	return []string{"describe " + t.kind + " " + t.name + nsFlag(t.namespace)}
+	return []string{"describe " + t.ref()}
 }
 
 func HasLogs(sel Selection) bool {

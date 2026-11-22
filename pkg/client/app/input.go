@@ -49,6 +49,7 @@ func (p *Pointer) Gather(now float64) hud.Input {
 	in.Ctrl = ebiten.IsKeyPressed(ebiten.KeyControl) || ebiten.IsKeyPressed(ebiten.KeyMeta)
 	in.Control = ebiten.IsKeyPressed(ebiten.KeyControl)
 	in.Alt = ebiten.IsKeyPressed(ebiten.KeyAlt)
+	in.Layout = ebiten.KeyName
 	in.WheelX, in.Wheel = ebiten.Wheel()
 	in.Chars = ebiten.AppendInputChars(nil)
 	p.keysBuffer = inpututil.AppendJustPressedKeys(p.keysBuffer[:0])

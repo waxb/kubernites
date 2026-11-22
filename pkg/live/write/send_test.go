@@ -323,3 +323,59 @@ func TestAChoiceRememberedAsSeamlessBeforeTheRenameStillLoads(t *testing.T) {
 		t.Errorf("the level is named %q", Seamless.String())
 	}
 }
+
+func TestAChoiceRememberedUnderAnotherIdentityIsDroppedAndAskedAgain(t *testing.T) {
+	dir := t.TempDir()
+	old := `{"contexts": [{"context": {"Name": "default", "Server": "https://127.0.0.1:6443", "User": "default"}, "level": "DANGEROUSLY SEAMLESS", "warned": "DANGEROUSLY SEAMLESS", "classes": ["secrets"]}]}`
+	if err := os.WriteFile(MemoryPath(dir), []byte(old), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	m, err := LoadMemory(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := Context{Name: "default", Server: "https://127.0.0.1:6443", User: "default", Identity: "c0ffee"}
+	if r, ch, ok := m.Recall(now); ok || !ch.Identity || ch.Server || ch.User {
+		t.Fatalf("a choice remembered under the old key carried over: %+v %+v %v", r, ch, ok)
+	}
+	m.Keep(Remembered{Context: now, Level: Writes, Warned: Writes})
+	if err := SaveMemory(dir, m); err != nil {
+		t.Fatal(err)
+	}
+	back, err := LoadMemory(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r, _, ok := back.Recall(now); !ok || r.Level != Writes {
+		t.Fatalf("the new key did not come back: %+v %v", r, ok)
+	}
+	other := now
+	other.Identity = "beef"
+	if _, ch, ok := back.Recall(other); ok || !ch.Identity {
+		t.Fatalf("another identity behind the same names recalled the choice: %+v %v", ch, ok)
+	}
+}
+
+func TestTheDirectoryHoldingTheLedgerAndTheChoicesIsPrivate(t *testing.T) {
+	for _, write := range []func(dir string) error{
+		func(dir string) error { return SaveMemory(dir, Memory{}) },
+		func(dir string) error {
+			return OpenLedger(dir, Context{Name: "prod", Server: "https://p", User: "u"}).Append(Entry{Context: "prod", Order: "kubectl scale deployment web --replicas=3"})
+		},
+	} {
+		dir := filepath.Join(t.TempDir(), "kubernites")
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := write(dir); err != nil {
+			t.Fatal(err)
+		}
+		st, err := os.Stat(dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if st.Mode().Perm() != 0o700 {
+			t.Errorf("the settings directory holding the ledger and the live choices is %v, want 0700", st.Mode().Perm())
+		}
+	}
+}

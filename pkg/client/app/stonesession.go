@@ -57,7 +57,11 @@ func (s *Session) recordSession(order string, ss kubectltree.Session) {
 	if !ss.Opened || ss.Channel == "portforward" {
 		return
 	}
-	s.recordReach(order, ss.Verb, ss.Namespace, ss.Pod, ss.Container, strings.Join(ss.Command, " "), sessionEnded(ss))
+	program := ""
+	if len(ss.Command) > 0 {
+		program = ss.Command[0]
+	}
+	s.recordReach(order, ss.Verb, ss.Namespace, ss.Pod, ss.Container, program, sessionEnded(ss))
 }
 
 func (s *Session) recordReach(order, verb, namespace, pod, container, command, ended string) {

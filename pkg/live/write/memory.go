@@ -36,18 +36,22 @@ func (r Remembered) Choice() Choice {
 	return Choice{Context: r.Context, Level: r.Level, Classes: slices.Clone(r.Classes)}
 }
 
+const MemoryVersion = 2
+
 type Memory struct {
+	Version  int          `json:"version,omitempty"`
 	Contexts []Remembered `json:"contexts"`
 }
 
 type Changed struct {
-	Was    Context
-	Server bool
-	User   bool
+	Was      Context
+	Server   bool
+	User     bool
+	Identity bool
 }
 
 func (c Changed) Any() bool {
-	return c.Server || c.User
+	return c.Server || c.User || c.Identity
 }
 
 func MemoryPath(dir string) string {
@@ -74,12 +78,19 @@ func LoadMemory(dir string) (Memory, error) {
 		return Memory{}, fmt.Errorf("read %s: %w", MemoryFile, err)
 	}
 	out := Memory{}
+	rewrite := m.Version < MemoryVersion
 	for _, r := range m.Contexts {
 		if r.Context.Name == "" || (r.Level != Writes && r.Level != Seamless) {
 			continue
 		}
+		if shown := RedactServer(r.Context.Server); shown != r.Context.Server {
+			r.Context.Server, rewrite = shown, true
+		}
 		var classes []Class
 		for _, c := range r.Classes {
+			if m.Version < MemoryVersion && c == Unpreviewed {
+				continue
+			}
 			if KnownClass(c) && !slices.Contains(classes, c) {
 				classes = append(classes, c)
 			}
@@ -90,6 +101,11 @@ func LoadMemory(dir string) (Memory, error) {
 		}
 		out.Keep(r)
 	}
+	if rewrite {
+		if err := SaveMemory(dir, out); err != nil {
+			return out, fmt.Errorf("rewrite %s: %w", MemoryFile, err)
+		}
+	}
 	return out, nil
 }
 
@@ -98,11 +114,12 @@ func SaveMemory(dir string, m Memory) error {
 	if path == "" {
 		return nil
 	}
+	m.Version = MemoryVersion
 	data, err := json.MarshalIndent(m, "", "  ")
 	if err != nil {
 		return err
 	}
-	if err := os.MkdirAll(dir, 0o700); err != nil {
+	if err := PrivateDir(dir); err != nil {
 		return err
 	}
 	tmp := path + ".tmp"
@@ -112,12 +129,19 @@ func SaveMemory(dir string, m Memory) error {
 	return os.Rename(tmp, path)
 }
 
+func PrivateDir(dir string) error {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return err
+	}
+	return os.Chmod(dir, 0o700)
+}
+
 func (m Memory) Recall(c Context) (Remembered, Changed, bool) {
 	for _, r := range m.Contexts {
 		if r.Context.Name != c.Name {
 			continue
 		}
-		ch := Changed{Was: r.Context, Server: r.Context.Server != c.Server, User: r.Context.User != c.User}
+		ch := Changed{Was: r.Context, Server: r.Context.Server != c.Server, User: r.Context.User != c.User, Identity: r.Context.Identity != c.Identity}
 		if ch.Any() {
 			return Remembered{}, ch, false
 		}

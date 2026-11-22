@@ -96,6 +96,8 @@ func NewCapture(path, scene string, g *Game) (*Capture, error) {
 	if scene == "" {
 		scene = "realm"
 	}
+	captureLabel = true
+	g.Title.Version = VersionLabel()
 	if base, ok := strings.CutSuffix(scene, KubeScene); ok {
 		scene, g.Settings.TrueNames = base, true
 		ApplyNames(true)

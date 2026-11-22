@@ -22,17 +22,20 @@ func beaconUnit(zoom float64) int {
 	return max(2, int(zoom+.5)+1)
 }
 
-func BeaconRect(sx, sy, zoom float64) ui.Rect {
+func beaconArrow(sx, sy, zoom float64) ui.Rect {
 	k := beaconUnit(zoom)
 	lift := beaconHeight(zoom) * zoom
 	amp := beaconAmp * zoom
 	top := int(sy-lift-amp) - beaconWidth*k/2 - 4*k - beaconMargin
 	bottom := int(sy-lift+amp) - beaconWidth*k/2 + 5*k + k/2 + beaconMargin + 1
 	half := beaconWidth*k/2 + beaconMargin
-	beacon := ui.Rect{X: int(sx) - half, Y: top, W: 2*half + k/2 + 1, H: bottom - top}
+	return ui.Rect{X: int(sx) - half, Y: top, W: 2*half + k/2 + 1, H: bottom - top}
+}
+
+func BeaconRect(sx, sy, zoom float64) ui.Rect {
 	reach := int(math.Ceil(beaconTarget * zoom))
 	spot := ui.Rect{X: int(sx) - reach, Y: int(sy) - 2*reach, W: 2 * reach, H: 2*reach + beaconMargin}
-	return union(beacon, spot)
+	return union(beaconArrow(sx, sy, zoom), spot)
 }
 
 func (r *Renderer) beaconSpots(cam render.Camera, sc Scene) []beaconSpot {

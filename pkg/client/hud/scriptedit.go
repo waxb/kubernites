@@ -2,6 +2,7 @@ package hud
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/hajimehoshi/ebiten/v2"
@@ -56,6 +57,8 @@ type editState struct {
 	stale     bool
 	refused   bool
 	at        float64
+	revealing string
+	reveal    <-chan Revealed
 }
 
 func (h *HUD) LiveEditing() (LiveEdit, bool) {
@@ -95,7 +98,7 @@ func (h *HUD) busyEdit() bool {
 
 func (h *HUD) sendLiveEdit(force bool) []Intent {
 	st := h.liveEdit
-	if st == nil || st.run != nil || h.backend.Send == nil || h.liveReadOnly() {
+	if st == nil || st.run != nil || st.revealing != "" || h.backend.Send == nil || h.liveReadOnly() {
 		return nil
 	}
 	job, ok := h.backend.Send(st.edit, h.Script.Editor.Text(), force)
@@ -128,6 +131,7 @@ func EditCommand(ref, namespace string) string {
 }
 
 func (h *HUD) pumpEdit() []Intent {
+	h.pumpReveal()
 	st := h.liveEdit
 	if st == nil || st.run == nil {
 		return nil
@@ -213,7 +217,14 @@ func (h *HUD) liveEditButtons() []Button {
 	rail, foot := scriptRail(), scriptFooter()
 	out := []Button{}
 	for i, key := range st.edit.Hidden {
-		out = append(out, Button{ID: EditRevealID + key, Rect: ui.Rect{X: rail.X + 4, Y: rail.Y + 96 + i*20, W: rail.W - 8, H: 16}, Label: "REVEAL " + strings.ToUpper(ui.Clip(key, 14)), Tip: ui.Bridge("Show this one hidden value", "Show this key's value; the others stay masked")})
+		if st.run != nil {
+			break
+		}
+		label := "REVEAL " + strings.ToUpper(ui.Clip(key, 14))
+		if st.revealing == key {
+			label = "REVEALING..."
+		}
+		out = append(out, Button{ID: EditRevealID + key, Rect: ui.Rect{X: rail.X + 4, Y: rail.Y + 96 + i*20, W: rail.W - 8, H: 16}, Label: label, Tip: ui.Bridge("Show this one hidden value", "Show this key's value; the others stay masked"), Disabled: st.revealing != ""})
 	}
 	if r := st.run; r != nil && r.ask != nil {
 		label, tip := r.ask.GoLabel()
@@ -243,7 +254,7 @@ func (h *HUD) liveEditButtons() []Button {
 		}
 		out = append(out,
 			Button{ID: EditReloadID, Rect: ui.Rect{X: foot.X + foot.W - 212, Y: foot.Y + 2, W: 100, H: 18}, Label: "RELOAD", Tip: "Read the live object again; your changes are lost", Disabled: st.run != nil},
-			h.sendButton(foot, label, st.run != nil))
+			h.sendButton(foot, label, st.run != nil || st.revealing != ""))
 	}
 	return append(out, closeButton(Overlay))
 }
@@ -277,14 +288,29 @@ func (h *HUD) pressLiveEdit(rest string) []Intent {
 
 func (h *HUD) revealKey(key string) {
 	st := h.liveEdit
-	if st == nil || h.backend.Reveal == nil {
+	if st == nil || h.backend.Reveal == nil || st.run != nil || st.revealing != "" || !slices.Contains(st.edit.Hidden, key) {
 		return
 	}
-	value, ok := h.backend.Reveal(st.edit, key)
-	if !ok {
+	st.revealing, st.reveal = key, h.backend.Reveal(st.edit, key)
+}
+
+func (h *HUD) pumpReveal() {
+	st := h.liveEdit
+	if st == nil || st.reveal == nil {
 		return
 	}
-	text, done := RevealLine(h.Script.Editor.Text(), key, value)
+	var r Revealed
+	select {
+	case r = <-st.reveal:
+	default:
+		return
+	}
+	key := st.revealing
+	st.revealing, st.reveal = "", nil
+	if !r.OK {
+		return
+	}
+	text, done := RevealLine(h.Script.Editor.Text(), key, r.Value)
 	if !done {
 		return
 	}
@@ -348,7 +374,7 @@ func (h *HUD) liveEditKeys(in Input) []Intent {
 		switch {
 		case k == ebiten.KeyEscape:
 			h.OverlayID = OverlayNone
-		case (k == ebiten.KeyEnter || k == ebiten.KeyNumpadEnter) && in.Ctrl:
+		case (k == ebiten.KeyEnter || k == ebiten.KeyNumpadEnter) && in.Control:
 			return h.sendLiveEdit(false)
 		case k == ebiten.KeyEnter || k == ebiten.KeyNumpadEnter:
 			s.Editor.Newline()

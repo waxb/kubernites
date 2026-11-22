@@ -57,14 +57,25 @@ func hutReachSpecs(p *corev1.Pod, worker string) []orderSpec {
 		access: reachAccess("attach", "create", p)}
 	ports := forwardPortsOf(p)
 	forward := orderSpec{key: "port-forward", label: "FORWARD", icon: "icon/key-gate", cell: 1, page: 1, chord: "F", verb: "forward a port to it",
-		stone:  "kubectl port-forward " + p.Name + ns + " " + strings.Join(ports, " "),
+		stone:  "kubectl port-forward " + p.Name + " -n " + p.Namespace + " " + strings.Join(ports, " "),
 		tip:    ui.Bridge("Forward this hut's ports to 127.0.0.1 on this computer. The live card lists the forward with STOP.", "kubectl port-forward: listen on 127.0.0.1 only, forwarding to the Pod's ports. The live card lists it with STOP."),
-		access: reachAccess("portforward", "create", p), stoneRun: len(ports) > 0}
+		access: reachAccess("portforward", "create", p), stoneRun: len(ports) > 0, askFirst: true}
 	if len(ports) == 0 {
 		forward.stone = strings.TrimSpace(forward.stone) + " "
 		forward.tip += ui.Bridge(" This hut names no port: type one in the Stone.", " This Pod declares no port: type one in the Stone.")
 	}
+	forward.title, forward.object, forward.lines = "FORWARD", objectName("Pod", p), forwardLines(ports, forward.stone)
 	return []orderSpec{logs, shell, more, attach, forward}
+}
+
+func forwardLines(ports []string, stone string) []string {
+	if len(ports) == 0 {
+		return []string{ui.Bridge("This hut names no port: the Speaking Stone opens with the order typed, for a port to be added; a forward listens on 127.0.0.1 of this computer only.", "This Pod declares no port: the Stone opens with the command typed, for a port to be added; a forward listens on 127.0.0.1 of this computer only."),
+			ui.Bridge("", "Stone: "+strings.TrimSpace(stone))}
+	}
+	list := strings.Join(ports, " ")
+	return []string{ui.Bridge("Ports "+list+" of this hut, each listening on 127.0.0.1 of this computer; the live card lists the forward with STOP.", "Ports "+list+", each listening on 127.0.0.1 of this computer; the live card lists the forward with STOP."),
+		ui.Bridge("The Speaking Stone opens it.", "Stone: "+stone)}
 }
 
 func (s *Session) runStoneOrder(sp orderSpec) []hud.Intent {

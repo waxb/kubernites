@@ -15,6 +15,8 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
+	"time"
 
 	"github.com/go-logr/logr"
 	"github.com/spf13/cobra"
@@ -44,19 +46,22 @@ type Config struct {
 	Context    string
 	Wrap       func(*rest.Config) *rest.Config
 	Local      string
+	Server     string
 }
 
 type Tree struct {
 	paths   []string
 	context string
 	wrap    func(*rest.Config) *rest.Config
+	server  string
 	cache   string
-	mu      sync.Mutex
+	slot    chan struct{}
 	holdMu  sync.Mutex
 	hold    Hold
 	running context.CancelFunc
 	closing bool
 	fw      forwards
+	guard   guarded
 	local   string
 }
 
@@ -70,6 +75,7 @@ type Held struct {
 	Local     string
 	Writing   bool
 	Overwrite string
+	More      string
 }
 
 func (t *Tree) SetHold(fn Hold) {
@@ -139,7 +145,7 @@ func New(c Config) (*Tree, error) {
 		os.RemoveAll(cache)
 		return nil, errors.New("the Stone's kubectl needs a home directory for the local side of kubectl cp")
 	}
-	return &Tree{paths: paths, context: c.Context, wrap: c.Wrap, cache: cache, local: filepath.Clean(local)}, nil
+	return &Tree{paths: paths, context: c.Context, wrap: c.Wrap, server: c.Server, cache: cache, local: filepath.Clean(local), slot: make(chan struct{}, 1)}, nil
 }
 
 func (t *Tree) Close() error {
@@ -150,12 +156,16 @@ func (t *Tree) Close() error {
 	}
 	t.holdMu.Unlock()
 	t.stopForwards()
-	if !t.mu.TryLock() {
+	select {
+	case t.slot <- struct{}{}:
+	default:
 		return nil
 	}
-	defer t.mu.Unlock()
+	defer func() { <-t.slot }()
 	return t.removeCache()
 }
+
+const ReasonBusy = "the Stone was still busy with another command when this one stopped waiting"
 
 func (t *Tree) removeCache() error {
 	if t.cache == "" {
@@ -217,6 +227,7 @@ type run struct {
 	stdin    bool
 	asking   sync.Mutex
 	declared []write.Class
+	declined []write.Class
 	hold     Hold
 	local    string
 	writing  bool
@@ -230,7 +241,9 @@ type run struct {
 	term     *Terminal
 	sessions []*Session
 	onOpen   func(*Session)
+	out      *streams
 	mu       sync.Mutex
+	left     atomic.Bool
 }
 
 func (r *run) opened(s *Session) {
@@ -279,7 +292,24 @@ func (r *run) ask(ctx context.Context, h Held) bool {
 	if ctx.Err() != nil {
 		return false
 	}
-	return r.hold(ctx, r.held(h))
+	var refusal *write.Refusal
+	class := write.Class("")
+	if errors.As(h.Err, &refusal) && refusal.Why == write.NeedsClass {
+		class = refusal.Class
+	}
+	r.mu.Lock()
+	gone := class != "" && slices.Contains(r.declined, class)
+	r.mu.Unlock()
+	if gone {
+		return false
+	}
+	ok := r.hold(ctx, r.held(h))
+	if !ok && class != "" {
+		r.mu.Lock()
+		r.declined = append(r.declined, class)
+		r.mu.Unlock()
+	}
+	return ok
 }
 
 func (r *run) refuse(reason string) {
@@ -320,8 +350,13 @@ func (t *Tree) run(ctx context.Context, line string, h hooks) Result {
 }
 
 func (t *Tree) runAs(ctx context.Context, args []string, h hooks) Result {
-	t.mu.Lock()
-	defer t.mu.Unlock()
+	select {
+	case t.slot <- struct{}{}:
+	case <-ctx.Done():
+		return refusedResult(Result{Command: slices.Clone(args)}, ReasonBusy)
+	}
+	defer func() { <-t.slot }()
+	t.freshGuard()
 	defer func() {
 		t.holdMu.Lock()
 		closing := t.closing
@@ -343,12 +378,8 @@ func (t *Tree) runAs(ctx context.Context, args []string, h hooks) Result {
 	if src, dst, ok := MigrationWouldWrite(); ok {
 		return refusedResult(res, fmt.Sprintf("the Stone's kubectl will not run: client-go would copy %s to %s, and Kubernites never writes a kubeconfig", src, dst))
 	}
-	local := clientSide(args)
-	if local && templated(args) && makesSecrets(args) {
-		return refusedResult(res, ReasonClientSecret)
-	}
-	out := &streams{sink: h.sink, held: local}
-	r := &run{command: slices.Clone(args), reveal: h.reveal, wrote: h.wrote, term: h.term, onOpen: h.opened, stdin: h.stdin != nil}
+	out := &streams{sink: h.sink, hidden: t.serverUserinfos()}
+	r := &run{command: slices.Clone(args), reveal: h.reveal, wrote: h.wrote, term: h.term, onOpen: h.opened, stdin: h.stdin != nil, out: out}
 	ios := genericiooptions.IOStreams{In: bytes.NewReader(nil), Out: out.writer(&out.stdout, false), ErrOut: out.writer(&out.stderr, true)}
 	if h.stdin != nil {
 		saved := os.Stdin
@@ -377,7 +408,7 @@ func (t *Tree) runAs(ctx context.Context, args []string, h hooks) Result {
 	root := kubectlcmd.NewKubectlCommand(kubectlcmd.KubectlOptions{ConfigFlags: cf, IOStreams: ios, Arguments: append([]string{"kubectl"}, args...)})
 	t.prune(root, cf, ios, r)
 	t.reachInto(root, cf, ios, r, ctx)
-	guardFiles(root, r)
+	t.guardFiles(root, r)
 	if c, _, err := root.Find(args); err == nil && strings.HasPrefix(c.Name(), "__") {
 		return refusedResult(res, "kubectl "+c.Name()+" is not part of the Stone: shell completion would run plugins")
 	}
@@ -385,7 +416,20 @@ func (t *Tree) runAs(ctx context.Context, args []string, h hooks) Result {
 	root.SetIn(ios.In)
 	root.SetOut(ios.Out)
 	root.SetErr(ios.ErrOut)
-	res.Code = execute(ctx, root, ios.ErrOut)
+	abandoned := false
+	finished := make(chan int, 1)
+	go func() { finished <- execute(ctx, root, ios.ErrOut) }()
+	select {
+	case res.Code = <-finished:
+	case <-ctx.Done():
+		select {
+		case res.Code = <-finished:
+		case <-time.After(AbandonAfter):
+			r.left.Store(true)
+			out.abandon()
+			res.Code, abandoned = 1, true
+		}
+	}
 	res.Stopped = ctx.Err() != nil
 	r.mu.Lock()
 	res.Refused, res.Requests, res.Writes = r.refused, r.requests, slices.Clone(r.writes)
@@ -393,15 +437,25 @@ func (t *Tree) runAs(ctx context.Context, args []string, h hooks) Result {
 		res.Sessions = append(res.Sessions, *ss)
 	}
 	r.mu.Unlock()
+	if abandoned {
+		tail := "error: " + ReasonAbandoned + "\n"
+		res.Output, res.Stdout, res.Stderr = out.snapshot(tail)
+		return res
+	}
 	if r.edit != nil && res.Code == 0 {
 		res.Edit, res.Code = fetchEdit(cf, r.edit, ios.ErrOut)
 	}
-	if local {
-		out.release()
+	if out.holding() {
+		out.release(ctx)
 	}
-	res.Output, res.Stdout, res.Stderr = out.all.String(), out.stdout.String(), out.stderr.String()
+	res.Output, res.Stdout, res.Stderr = out.snapshot("")
 	return res
 }
+
+const (
+	AbandonAfter    = 2 * time.Second
+	ReasonAbandoned = "stopped: kubectl kept waiting, so the Stone left it and refuses everything it still sends"
+)
 
 func refusedResult(res Result, reason string) Result {
 	res.Refused = reason
@@ -444,33 +498,123 @@ func execute(ctx context.Context, root *cobra.Command, errOut io.Writer) (code i
 	return 0
 }
 
-func keep(buf *bytes.Buffer, p []byte) {
+func keep(buf *bytes.Buffer, p []byte) bool {
 	buf.Write(p)
 	if buf.Len() <= MaxOutput {
-		return
+		return false
 	}
 	tail := append([]byte(nil), buf.Bytes()[buf.Len()-MaxOutput*3/4:]...)
 	buf.Reset()
 	buf.Write(tail)
+	return true
 }
+
+const notMaskedErrors = "(the Stone held kubectl's errors to mask Secret values in them, but they grew past what it keeps, so they are not shown)\n"
 
 type streams struct {
-	mu     sync.Mutex
-	all    bytes.Buffer
-	stdout bytes.Buffer
-	stderr bytes.Buffer
-	sink   Sink
-	held   bool
-	local  bytes.Buffer
+	mu       sync.Mutex
+	all      bytes.Buffer
+	stdout   bytes.Buffer
+	stderr   bytes.Buffer
+	sink     Sink
+	held     bool
+	heldErr  bool
+	local    bytes.Buffer
+	localErr bytes.Buffer
+	localCut bool
+	errCut   bool
+	known    []string
+	gone     bool
+	carry    [2]string
+	hidden   []string
+	format   string
 }
 
-func (s *streams) release() {
+func (s *streams) redact(text string) string {
+	text = write.Redact(text)
+	for _, h := range s.hidden {
+		text = strings.ReplaceAll(text, h, "")
+	}
+	return text
+}
+
+const maxCarry = 512
+
+func (s *streams) hold(format string) {
 	s.mu.Lock()
-	text := maskLocal(s.local.String())
-	s.held = false
+	defer s.mu.Unlock()
+	if !s.held {
+		s.localCut = false
+	}
+	s.held, s.format = true, format
+}
+
+func (s *streams) holdErr(known []string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !s.heldErr {
+		s.errCut = false
+	}
+	s.heldErr = true
+	s.known = append(s.known, known...)
+}
+
+func (s *streams) holding() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.held || s.heldErr
+}
+
+func (s *streams) abandon() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.gone, s.sink = true, nil
+}
+
+func (s *streams) snapshot(tail string) (string, string, string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.flushCarry()
+	return s.all.String() + tail, s.stdout.String(), s.stderr.String() + tail
+}
+
+func (s *streams) flushCarry() {
+	for i, c := range s.carry {
+		if c != "" {
+			s.carry[i] = ""
+			own := &s.stdout
+			if i == 1 {
+				own = &s.stderr
+			}
+			streamWriter{s: s, own: own, stderr: i == 1}.emit(s.redact(c))
+		}
+	}
+}
+
+func (s *streams) release(ctx context.Context) {
+	s.mu.Lock()
+	s.flushCarry()
+	text, errText := "", ""
+	if s.held {
+		text = maskLocal(s.format, s.local.String())
+		if s.localCut {
+			text = notMasked
+		}
+	}
+	if s.heldErr {
+		errText, _, _ = maskErrorsIn(ctx, s.localErr.String(), s.known)
+		if s.errCut {
+			errText = notMaskedErrors
+		}
+	}
+	s.localCut, s.errCut = false, false
+	s.held, s.heldErr = false, false
 	s.mu.Unlock()
 	if text != "" {
 		streamWriter{s: s, own: &s.stdout}.Write([]byte(text))
+	}
+	if errText != "" {
+		streamWriter{s: s, own: &s.stderr, stderr: true}.Write([]byte(errText))
 	}
 }
 
@@ -487,16 +631,47 @@ func (s *streams) writer(own *bytes.Buffer, stderr bool) io.Writer {
 func (w streamWriter) Write(p []byte) (int, error) {
 	w.s.mu.Lock()
 	defer w.s.mu.Unlock()
-	if w.s.held && !w.stderr {
-		keep(&w.s.local, p)
+	if w.s.gone {
 		return len(p), nil
+	}
+	i := 0
+	if w.stderr {
+		i = 1
+	}
+	text := w.s.carry[i] + string(p)
+	w.s.carry[i] = ""
+	if n := len(text); n > 0 && !strings.ContainsAny(text[n-1:], " \t\r\n") {
+		cut := strings.LastIndexAny(text, " \t\r\n") + 1
+		if n-cut <= maxCarry {
+			w.s.carry[i], text = text[cut:], text[:cut]
+		}
+	}
+	w.emit(w.s.redact(text))
+	return len(p), nil
+}
+
+func (w streamWriter) emit(text string) {
+	if text == "" {
+		return
+	}
+	p := []byte(text)
+	if w.s.held && !w.stderr {
+		if keep(&w.s.local, p) {
+			w.s.localCut = true
+		}
+		return
+	}
+	if w.s.heldErr && w.stderr {
+		if keep(&w.s.localErr, p) {
+			w.s.errCut = true
+		}
+		return
 	}
 	keep(&w.s.all, p)
 	keep(w.own, p)
 	if w.s.sink != nil {
-		w.s.sink(string(p), w.stderr)
+		w.s.sink(text, w.stderr)
 	}
-	return len(p), nil
 }
 
 func (t *Tree) flags(ctx context.Context, ios genericiooptions.IOStreams, r *run, hold Hold) *genericclioptions.ConfigFlags {
@@ -544,6 +719,9 @@ func (s stopper) RoundTrip(req *http.Request) (*http.Response, error) {
 		if req.Body != nil {
 			req.Body.Close()
 		}
+		if s.run.left.Load() {
+			runtime.Goexit()
+		}
 		return nil, err
 	}
 	s.run.count()
@@ -556,6 +734,7 @@ func (s stopper) RoundTrip(req *http.Request) (*http.Response, error) {
 	}
 	ctx, cancel := context.WithCancel(req.Context())
 	stop := context.AfterFunc(s.ctx, cancel)
+	ctx, passing := write.WithPassing(ctx)
 	resp, err := s.next.RoundTrip(req.WithContext(ctx))
 	for holds := 0; err != nil && s.hold != nil && holds < maxHolds && s.ctx.Err() == nil; holds++ {
 		body, ok := replayable(req)
@@ -572,9 +751,12 @@ func (s stopper) RoundTrip(req *http.Request) (*http.Response, error) {
 	if err != nil {
 		stop()
 		cancel()
+		if passed, isChange := passing.Passed(); passed && isChange && changeKind(req) {
+			s.run.note(Write{Method: req.Method, Path: apiPath(req.URL.Path), Name: postedName(req), Status: NoAnswer + ": " + write.Redact(err.Error())})
+		}
 		return nil, err
 	}
-	if w, ok := change(req, resp); ok {
+	if w, ok := change(req, resp, passing); ok {
 		s.run.note(w)
 	}
 	if masked {
@@ -586,34 +768,54 @@ func (s stopper) RoundTrip(req *http.Request) (*http.Response, error) {
 
 var selfReviews = []string{"/selfsubjectaccessreviews", "/selfsubjectrulesreviews", "/selfsubjectreviews"}
 
-func change(req *http.Request, resp *http.Response) (Write, bool) {
+const NoAnswer = "sent, no answer"
+
+func postedName(req *http.Request) string {
+	if req.Method != http.MethodPost {
+		return ""
+	}
+	body, _ := replayable(req)
+	var obj struct {
+		Metadata struct {
+			Name string `json:"name"`
+		} `json:"metadata"`
+	}
+	if json.Unmarshal(body, &obj) != nil {
+		return ""
+	}
+	return obj.Metadata.Name
+}
+
+func changeKind(req *http.Request) bool {
 	if req.Method == http.MethodGet || req.Method == http.MethodHead {
-		return Write{}, false
+		return false
 	}
 	if write.Connects(write.Request{Method: req.Method, Path: apiPath(req.URL.Path)}) {
-		return Write{}, false
+		return false
 	}
 	for _, s := range selfReviews {
 		if req.Method == http.MethodPost && strings.HasSuffix(req.URL.Path, s) {
+			return false
+		}
+	}
+	return true
+}
+
+func change(req *http.Request, resp *http.Response, passing *write.Passing) (Write, bool) {
+	if !changeKind(req) {
+		return Write{}, false
+	}
+	if passed, isChange := passing.Passed(); passed {
+		if !isChange {
+			return Write{}, false
+		}
+	} else {
+		body, _ := replayable(req)
+		if r := (write.Request{Method: req.Method, Path: apiPath(req.URL.Path), Query: req.URL.Query(), Body: body}); r.DryRun() && !write.IgnoresDryRun(r) {
 			return Write{}, false
 		}
 	}
-	body, _ := replayable(req)
-	if (write.Request{Method: req.Method, Path: req.URL.Path, Query: req.URL.Query(), Body: body}).DryRun() {
-		return Write{}, false
-	}
-	w := Write{Method: req.Method, Path: req.URL.Path, Code: resp.StatusCode, Status: resp.Status}
-	if req.Method == http.MethodPost {
-		var obj struct {
-			Metadata struct {
-				Name string `json:"name"`
-			} `json:"metadata"`
-		}
-		if json.Unmarshal(body, &obj) == nil {
-			w.Name = obj.Metadata.Name
-		}
-	}
-	return w, true
+	return Write{Method: req.Method, Path: apiPath(req.URL.Path), Name: postedName(req), Code: resp.StatusCode, Status: resp.Status}, true
 }
 
 func apiPath(path string) string {
@@ -670,79 +872,5 @@ func (v lockedValue) Set(string) error {
 	v.run.refuse(v.reason)
 	return errors.New(v.reason)
 }
-
-type guardedFiles struct {
-	pflag.Value
-	run   *run
-	keyed bool
-}
-
-func (v guardedFiles) Set(s string) error {
-	for _, part := range strings.Split(s, ",") {
-		p := strings.ToLower(strings.TrimSpace(part))
-		if strings.HasPrefix(p, "http://") || strings.HasPrefix(p, "https://") {
-			v.run.refuse(webFiles)
-			return errors.New(webFiles)
-		}
-		if p == "-" && !v.run.stdin {
-			v.run.refuse(noStdin)
-			return errors.New(noStdin)
-		}
-		local := strings.TrimSpace(part)
-		if v.keyed {
-			if _, path, ok := strings.Cut(local, "="); ok {
-				local = path
-			}
-		}
-		if err := plainFiles(local); err != nil {
-			v.run.refuse(err.Error())
-			return err
-		}
-	}
-	return v.Value.Set(s)
-}
-
-const maxWalk = 10000
-
-func plainFiles(path string) error {
-	if path == "" {
-		return nil
-	}
-	st, err := os.Stat(path)
-	if err != nil {
-		return nil
-	}
-	refuse := func(p string) error {
-		return fmt.Errorf("the Stone reads only regular files and directories: %s is not one, and reading it could wait forever", p)
-	}
-	if st.Mode().IsRegular() {
-		return nil
-	}
-	if !st.IsDir() {
-		return refuse(path)
-	}
-	seen := 0
-	return filepath.WalkDir(path, func(p string, d os.DirEntry, err error) error {
-		if err != nil || p == path {
-			return nil
-		}
-		if seen++; seen > maxWalk {
-			return fmt.Errorf("the Stone reads at most %d entries of a directory: %s holds more", maxWalk, path)
-		}
-		st, err := os.Stat(p)
-		if err != nil {
-			return nil
-		}
-		if !st.Mode().IsRegular() && !st.IsDir() {
-			return refuse(p)
-		}
-		return nil
-	})
-}
-
-const (
-	webFiles = "the Stone reads manifests from files: a web address would be fetched outside Kubernites' gate"
-	noStdin  = "the Stone has no standard input: write the manifest in the Scriptorium"
-)
 
 const MaxOutput = 4 << 20

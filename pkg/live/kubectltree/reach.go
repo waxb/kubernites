@@ -183,6 +183,7 @@ func (s *reach) debugCommand(kubectl *cobra.Command) *cobra.Command {
 	o := debug.NewDebugOptions(s.ios)
 	c := &cobra.Command{Use: kubectl.Use, DisableFlagsInUseLine: true, Short: kubectl.Short, Long: kubectl.Long, Example: kubectl.Example, GroupID: kubectl.GroupID}
 	c.Run = func(cmd *cobra.Command, args []string) {
+		s.run.declare(write.Workloads)
 		o.AttachFunc = func(ctx context.Context, getter genericclioptions.RESTClientGetter, cmdPath, ns, pod, container string) error {
 			return s.debugAttach(ctx, getter, cmdPath, ns, pod, container, o)
 		}
@@ -293,6 +294,7 @@ func (s *reach) runRun(create func(*cobra.Command, []string)) func(*cobra.Comman
 			create(cmd, args)
 			return
 		}
+		s.run.declare(write.Workloads)
 		if tty && !stdin {
 			cmdutil.CheckErr(errors.New("-i/--stdin is required for containers with -t/--tty=true"))
 		}
@@ -347,6 +349,7 @@ func (s *reach) stream(ctx context.Context, u *url.URL, cfg *rest.Config, stdout
 	var keys *leaveReader
 	if s.stdin {
 		s.term.open(s.tty, s.nudge)
+		s.term.stopWith(cancel)
 		defer s.term.end()
 		keys = &leaveReader{r: term.NewEscapeProxy(s.term, mustKeys(LeaveKeys)), cancel: cancel}
 		opts.Stdin, opts.Stdout, opts.Tty = keys, s.term, s.tty
@@ -357,11 +360,20 @@ func (s *reach) stream(ctx context.Context, u *url.URL, cfg *rest.Config, stdout
 		}
 	}
 	err := s.executor(u, cfg, ctx, opts)
+	if s.stdin {
+		if failed := s.term.Failed(); failed != nil {
+			err = failed
+		}
+	}
 	s.finish(session, keys, err)
-	if keys != nil && keys.left() {
+	if s.left(keys) {
 		return nil
 	}
 	return err
+}
+
+func (s *reach) left(keys *leaveReader) bool {
+	return keys != nil && (keys.left() || s.term.Left())
 }
 
 func (s *reach) executor(u *url.URL, cfg *rest.Config, ctx context.Context, opts remotecommand.StreamOptions) error {
@@ -438,7 +450,7 @@ func (s *reach) finish(session *Session, keys *leaveReader, err error) {
 	session.Opened = err == nil || s.stdin && s.term.Live()
 	var code uexec.ExitError
 	switch {
-	case keys != nil && keys.left():
+	case s.left(keys):
 		session.Ended = EndedLeft
 	case s.ctx.Err() != nil:
 		session.Ended = EndedClosed
@@ -448,7 +460,7 @@ func (s *reach) finish(session *Session, keys *leaveReader, err error) {
 		session.Ended, session.Code = EndedExited, code.ExitStatus()
 		session.Opened = true
 	default:
-		session.Ended, session.Err = EndedFailed, err.Error()
+		session.Ended, session.Err = EndedFailed, write.Redact(err.Error())
 	}
 }
 

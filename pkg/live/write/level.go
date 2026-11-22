@@ -42,18 +42,21 @@ const (
 	Workloads   Class = "workloads"
 	Destroy     Class = "destroy"
 	Unpreviewed Class = "unpreviewed"
+	Tokens      Class = "tokens"
 )
 
-var AllClasses = []Class{Secrets, Workloads, Destroy, Unpreviewed}
+var AllClasses = []Class{Secrets, Workloads, Destroy, Unpreviewed, Tokens}
 
 func KnownClass(c Class) bool {
 	return slices.Contains(AllClasses, c)
 }
 
 type Context struct {
-	Name   string
-	Server string
-	User   string
+	Name      string
+	Server    string
+	User      string
+	Identity  string `json:",omitempty"`
+	ClusterID string `json:",omitempty"`
 }
 
 type Choice struct {

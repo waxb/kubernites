@@ -149,10 +149,29 @@ func maskAnnotation(v any) {
 	}
 	meta, _ := m["metadata"].(map[string]any)
 	if ann, ok := meta["annotations"].(map[string]any); ok {
-		if _, has := ann[lastConfig]; has {
-			ann[lastConfig] = Masked
+		if last, has := ann[lastConfig]; has {
+			ann[lastConfig] = maskLastApplied(last)
 		}
 	}
+}
+
+func maskLastApplied(v any) string {
+	text, ok := v.(string)
+	if !ok {
+		return Masked
+	}
+	var obj map[string]any
+	dec := json.NewDecoder(strings.NewReader(text))
+	dec.UseNumber()
+	if dec.Decode(&obj) != nil || obj == nil {
+		return Masked
+	}
+	maskSecret(obj)
+	out, err := json.Marshal(obj)
+	if err != nil {
+		return Masked
+	}
+	return string(out) + "\n"
 }
 
 func (t *Tree) Reveal(ctx context.Context, namespace, name, key string) (string, error) {

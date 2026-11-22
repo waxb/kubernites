@@ -12,6 +12,7 @@ import (
 	"github.com/waxb/kubernites/pkg/client/ui"
 	"github.com/waxb/kubernites/pkg/lexicon"
 	"github.com/waxb/kubernites/pkg/live"
+	"github.com/waxb/kubernites/pkg/live/livetest"
 	"github.com/waxb/kubernites/pkg/live/write"
 )
 
@@ -141,5 +142,68 @@ func TestResetLiveChoicesForgetsTheWarningsPassedOnTheOpenConnection(t *testing.
 		}
 		stoneFrame(s, ebiten.KeyEscape)
 		stoneEnds(t, s)
+	}
+}
+
+func TestAfterResetAWarningPassedAgainOnTheOpenConnectionCanStillBeForgotten(t *testing.T) {
+	rig := connectAt(t, hud.LevelWrites, livetest.Options{}, write.Secrets)
+	g := rig.g
+	if err := g.RealmIntent(hud.Intent{Kind: hud.IntentLiveChoices, Command: "forget-all"}); err != nil {
+		t.Fatal(err)
+	}
+	rig.s.Writer.gate.Pass(write.Workloads)
+	g.pushChoices()
+	open := rig.s.Writer.gate.Context().Name
+	var row *hud.LiveChoice
+	for _, c := range rig.s.Hud.LiveChoices() {
+		if c.Name == open {
+			row = &c
+		}
+	}
+	if row == nil || !slices.Contains(row.Classes, string(write.Workloads)) {
+		t.Fatalf("the open connection's passed warning is not offered to FORGET: %+v", rig.s.Hud.LiveChoices())
+	}
+	if err := g.RealmIntent(hud.Intent{Kind: hud.IntentLiveChoices, Command: "forget", Target: open}); err != nil {
+		t.Fatal(err)
+	}
+	if got := rig.s.Writer.gate.Classes(); len(got) != 0 {
+		t.Fatalf("FORGET left the open connection holding %v", got)
+	}
+}
+
+func TestEverySaveOfLiveChoicesKeepsWhatAnotherWindowSaved(t *testing.T) {
+	rig := connectAt(t, hud.LevelWrites, livetest.Options{}, write.Secrets)
+	g := rig.g
+	other := write.Remembered{Context: write.Context{Name: "other-window", Server: "https://other:6443", User: "u"}, Level: write.Writes, Warned: write.Writes}
+	mem, err := write.LoadMemory(rig.dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mem.Keep(other)
+	if err := write.SaveMemory(rig.dir, mem); err != nil {
+		t.Fatal(err)
+	}
+	g.forgetChoice(rig.s.Writer.gate.Context().Name)
+	back, err := write.LoadMemory(rig.dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, ok := back.Recall(other.Context); !ok {
+		t.Fatalf("forgetting one context dropped what another window saved: %+v", back)
+	}
+	if _, _, ok := back.Recall(rig.s.Writer.gate.Context()); ok {
+		t.Fatal("the forgotten context is still saved")
+	}
+	forgotten := write.Remembered{Context: write.Context{Name: "forgotten", Server: "https://f:6443", User: "u"}, Level: write.Writes, Warned: write.Writes}
+	g.choices.Keep(forgotten)
+	g.forgetChoice("forgotten")
+	back.Keep(forgotten)
+	if err := write.SaveMemory(rig.dir, back); err != nil {
+		t.Fatal(err)
+	}
+	g.forgetChoice(other.Context.Name)
+	again, _ := write.LoadMemory(rig.dir)
+	if _, _, ok := again.Recall(forgotten.Context); !ok {
+		t.Fatal("a save overwrote another window's newer file")
 	}
 }

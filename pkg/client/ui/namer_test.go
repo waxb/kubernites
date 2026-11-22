@@ -50,3 +50,27 @@ func TestAStoryNamerRenamesButIsNotKubernetesMode(t *testing.T) {
 		t.Fatalf("a bridge in story mode gave %q", got)
 	}
 }
+
+func TestVerbatimTextIsNeverRenamedInEitherModeOrAfterTheMemoryFills(t *testing.T) {
+	defer SetNamer(nil)
+	said := Verbatim(`deployments.apps "web" is forbidden in the namespace "market"`)
+	rename := func(s string) string {
+		return strings.NewReplacer("deployments", "crews", "namespace", "fief").Replace(s)
+	}
+	var f Font
+	for _, set := range []func(func(string) string){SetStoryNamer, SetNamer} {
+		set(rename)
+		for i := range namedMemory + 1 {
+			Name("filler " + strings.Repeat("x", i%7) + string(rune('a'+i%26)) + string(rune(i)))
+		}
+		if got := Name(said); got != said {
+			t.Errorf("Name renamed the cluster's words: %q", got)
+		}
+		if lines := f.Wrap(said, 20*Advance, 1); strings.Join(lines, " ") != said {
+			t.Errorf("Wrap renamed the cluster's words: %q", lines)
+		}
+	}
+	if got := Name("the deployments"); got != "the crews" {
+		t.Errorf("other text is no longer renamed: %q", got)
+	}
+}

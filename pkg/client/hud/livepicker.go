@@ -54,6 +54,9 @@ type LiveContext struct {
 	Server    string
 	User      string
 	Namespace string
+	Identity  string
+	Facets    string
+	ClusterID string
 }
 
 type LivePicker struct {
@@ -70,6 +73,7 @@ type LivePicker struct {
 	Forced     bool
 	Remembered map[string]LiveMemory
 	Changed    string
+	relisted   bool
 	warned     map[string]string
 	survey     liveSurvey
 	scroll     int
@@ -79,11 +83,16 @@ type LivePicker struct {
 }
 
 type LiveMemory struct {
-	Server  string
-	User    string
-	Level   string
-	Warned  string
-	Classes []string
+	Server   string
+	User     string
+	Identity string
+	Level    string
+	Warned   string
+	Classes  []string
+}
+
+func (m LiveMemory) same(c LiveContext) bool {
+	return m.Server == c.Server && m.User == c.User && m.Identity == c.Identity
 }
 
 type LiveWho struct {
@@ -129,12 +138,16 @@ func levelRank(l string) int {
 	return 0
 }
 
+func warnedKey(c LiveContext) string {
+	return strings.Join([]string{c.Name, c.Server, c.User, c.Identity}, "\x00")
+}
+
 func (p *LivePicker) passed(c LiveContext, level string) bool {
-	if levelRank(p.warned[c.Name]) >= levelRank(level) {
+	if levelRank(p.warned[warnedKey(c)]) >= levelRank(level) {
 		return true
 	}
 	m, ok := p.Remembered[c.Name]
-	return ok && m.Server == c.Server && m.User == c.User && levelRank(m.Warned) >= levelRank(level)
+	return ok && m.same(c) && levelRank(m.Warned) >= levelRank(level)
 }
 
 func (p *LivePicker) untick() []Intent {
@@ -147,7 +160,7 @@ func (p *LivePicker) untick() []Intent {
 		return []Intent{{Kind: IntentSound, Command: "error"}}
 	}
 	if m, ok := p.Remembered[c.Name]; ok {
-		if m.Server == c.Server && m.User == c.User {
+		if m.same(c) {
 			p.ReadOnly, p.Level = false, m.Level
 			return []Intent{click}
 		}
@@ -157,6 +170,9 @@ func (p *LivePicker) untick() []Intent {
 		}
 		if m.User != c.User {
 			what = append(what, "its user entry was "+m.User)
+		}
+		if m.Identity != c.Identity {
+			what = append(what, "its certificate authority, server certificate check, server certificate name, proxy, credentials or impersonation are not the ones it was chosen with")
 		}
 		p.Changed = "Changed since " + m.Level + " was chosen: " + strings.Join(what, " and ") + ". The remembered choice is dropped."
 		delete(p.Remembered, c.Name)
@@ -185,7 +201,50 @@ func (p *LivePicker) ShowContexts(list []LiveContext, err error) {
 }
 
 func (p *LivePicker) Failed(err error) {
-	p.Step, p.Err = LiveStepFailed, err.Error()
+	p.Step, p.Err, p.relisted = LiveStepFailed, err.Error(), false
+}
+
+func (p *LivePicker) IdentityChanged(name string, list []LiveContext, err error, what []string) {
+	level := p.ChosenLevel()
+	p.Contexts, p.Chosen, p.scroll = list, -1, 0
+	for i, c := range list {
+		if c.Name == name {
+			p.Chosen = i
+		}
+	}
+	p.scroll = max(0, p.Chosen-liveRows+1)
+	delete(p.Remembered, name)
+	for key := range p.warned {
+		if strings.HasPrefix(key, name+"\x00") {
+			delete(p.warned, key)
+		}
+	}
+	p.ReadOnly, p.Level, p.Changed = true, "", ""
+	changed := "other credentials, another certificate authority, server certificate check, server certificate name, proxy or impersonation"
+	if len(what) > 0 {
+		var named []string
+		for _, w := range what {
+			named = append(named, otherFacet(w))
+		}
+		changed = strings.Join(named, " and ")
+	}
+	text := "Context " + name + " changed since " + level + " was chosen: the kubeconfig now holds " + changed + ". Nothing was sent, and the remembered choice is dropped. BACK lists the contexts again: it opens READ ONLY, and unticking READ ONLY asks its warnings again."
+	if err != nil {
+		text += " The kubeconfig cannot be read now: " + err.Error()
+	}
+	p.Step, p.Err, p.relisted = LiveStepFailed, text, err == nil && p.Chosen >= 0
+}
+
+func otherFacet(facet string) string {
+	switch facet {
+	case "credentials":
+		return "other credentials"
+	case "server verification off":
+		return "a setting that turns off the checks of the server's certificate"
+	case "server verification on":
+		return "a setting that turns the checks of the server's certificate back on"
+	}
+	return "another " + facet
 }
 
 func (p *LivePicker) chosen() (LiveContext, bool) {
@@ -247,6 +306,8 @@ func (p *LivePicker) boxRect() ui.Rect {
 	return ui.Rect{X: okR.X - 12 - 120, Y: okR.Y, W: 120, H: okR.H}
 }
 
+const levelGap = 3
+
 func (p *LivePicker) levelButtons() []Button {
 	box := Button{ID: LiveBoxID, Rect: p.boxRect(), Label: "[x] READ ONLY", Tip: ReadOnlyTip}
 	switch {
@@ -257,7 +318,7 @@ func (p *LivePicker) levelButtons() []Button {
 	}
 	out := []Button{box}
 	if p.ChosenLevel() != LevelReadOnly {
-		r := ui.Rect{X: LiveBox.X + 20 + 9*ui.Advance - 3, Y: LiveBox.Y + 48 + 4*ui.LineHeight - 3, W: max(100, len(LevelSeamless)*ui.Advance+12), H: 14}
+		r := ui.Rect{X: LiveBox.X + 20 + 9*ui.Advance - 3, Y: LiveBox.Y + 48 + 4*ui.LineHeight + levelGap - 3, W: max(100, len(LevelSeamless)*ui.Advance+12), H: 14}
 		next := LevelSeamless
 		if p.Level == LevelSeamless {
 			next = LevelWrites
@@ -295,7 +356,7 @@ func (p *LivePicker) Update(in Input) []Intent {
 	if in.Wheel != 0 && p.Step == LiveStepList {
 		p.scroll = min(max(p.scroll-int(in.Wheel), 0), max(len(p.Contexts)-liveRows, 0))
 	}
-	if in.Pressed(ebiten.KeyY) && !in.Control {
+	if in.PressedLetter('y') && !in.Control {
 		if p.Step == LiveStepWrites || p.Step == LiveStepSeam {
 			return p.press(liveAllow)
 		}
@@ -348,6 +409,11 @@ func (p *LivePicker) back() []Intent {
 	case LiveStepOpening:
 		p.Step = LiveStepList
 		return []Intent{{Kind: IntentLiveCancel}}
+	case LiveStepFailed:
+		if p.relisted {
+			p.Step, p.relisted = LiveStepList, false
+			return []Intent{{Kind: IntentSound, Command: "click"}}
+		}
 	}
 	p.Close()
 	return []Intent{{Kind: IntentSound, Command: "click"}}
@@ -403,8 +469,8 @@ func (p *LivePicker) press(id string) []Intent {
 		if p.warned == nil {
 			p.warned = map[string]string{}
 		}
-		if levelRank(level) > levelRank(p.warned[c.Name]) {
-			p.warned[c.Name] = level
+		if levelRank(level) > levelRank(p.warned[warnedKey(c)]) {
+			p.warned[warnedKey(c)] = level
 		}
 		p.Step, p.ReadOnly, p.Level = LiveStepConfirm, false, level
 		return []Intent{click}
@@ -553,6 +619,7 @@ func (p *LivePicker) drawConfirm(dst *ebiten.Image) {
 	seen, clr := p.Who.line()
 	y = p.lines(dst, y, []string{"SEEN AS  " + ui.Clip(seen, 60)}, clr)
 	if level := p.ChosenLevel(); level != LevelReadOnly {
+		y += levelGap
 		liveFont.Draw(dst, "LEVEL", LiveBox.X+20, y, 1, LevelColour(level))
 		y += ui.LineHeight + 2
 	}
@@ -578,8 +645,8 @@ func LevelColour(level string) color.RGBA {
 
 func liveWritesBody() []string {
 	return []string{
-		"Kubernites will read this cluster as at READ ONLY, and the orders",
-		"on the cards and the write keys may change it. Each change",
+		"Kubernites draws this cluster as it does at READ ONLY. The orders",
+		"on the cards and the write keys may change it, and each change",
 		"first shows the server's dry-run preview and waits for CONFIRM.",
 		"",
 		"Nothing is ever changed on connect, and Kubernites never writes",
@@ -621,8 +688,8 @@ func (p *LivePicker) drawWritesWarning(dst *ebiten.Image) {
 		"dry-run preview, and nothing changes until CONFIRM; a shell,",
 		"attach or port-forward has no dry run, so CONFIRM shows what it",
 		"opens. Secrets, reaching into a workload (exec, attach, cp,",
-		"port-forward, debug, proxy) and destroying more than one thing",
-		"each warn once more on first use.",
+		"port-forward, debug, proxy), destroying more than one thing,",
+		"minting a token and a change with no preview each warn once more.",
 		"",
 		"The choice is remembered for this context. RESET LIVE CHOICES",
 		"in the MENU forgets it; READ ONLY is still ticked at each connect.",
@@ -641,12 +708,13 @@ func SeamlessWarningLines() []string {
 		"change the cluster as kubectl does: no dry-run preview and",
 		"no CONFIRM. Each order on a card still asks once, Y or Enter",
 		"on its form, as k9s asks before a restart, a rollback, a",
-		"trigger, a cordon, a delete or a drain. One chord, no question:",
-		"Ctrl-K kills a Pod, as k9s's kill does.",
+		"trigger, a cordon, a delete, a drain or a port-forward.",
+		"KILL, SHELL and ATTACH go from one chord, as in k9s.",
+		"Their chords are Ctrl-K, Ctrl-Y and Ctrl-J.",
 		"",
 		"Secrets, reaching into a workload (exec, attach, port-forward,",
-		"cp, debug, proxy) and destroying more than one thing still warn",
-		"once each. Port-forwards listen on 127.0.0.1 only.",
+		"cp, debug, proxy), destroying more than one thing and minting a",
+		"token still warn once each; port-forwards listen on 127.0.0.1 only.",
 		"",
 		"One key changes this cluster: use it only where a mistake",
 		"can be repaired.",

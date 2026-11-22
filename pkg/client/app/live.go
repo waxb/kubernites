@@ -232,6 +232,11 @@ func (g *Game) StepLive() {
 		opening.cancel()
 		g.Opening = nil
 		if res.err != nil {
+			var changed *live.IdentityChanged
+			if errors.As(res.err, &changed) {
+				g.identityChanged(changed.Context, changed.Facets)
+				return
+			}
 			g.Picker.Failed(opening.readable(res.err))
 			return
 		}
@@ -243,6 +248,18 @@ func (g *Game) StepLive() {
 			g.Picker.Failed(err)
 		}
 	}
+}
+
+func (g *Game) identityChanged(name, facets string) {
+	was := ""
+	if i := g.Picker.Chosen; i >= 0 && i < len(g.Picker.Contexts) && g.Picker.Contexts[i].Name == name {
+		was = g.Picker.Contexts[i].Facets
+	}
+	g.forgetChoice(name)
+	src := g.Opts.Live.withDefaults()
+	list, err := src.List(src.Files)
+	g.Picker.IdentityChanged(name, liveContexts(list), err, live.ChangedFacets(was, facets))
+	g.audio.PlaySFX(sound.SFXError)
 }
 
 type pumper interface {
@@ -273,18 +290,39 @@ func (g *Game) EnterLive(r client.Realm) {
 }
 
 func (g *Game) stopWatching() {
-	if g.Sess == nil || !g.Sess.Live {
+	g.Sess.endLive()
+}
+
+const liveEndWait = 2 * time.Second
+
+func (s *Session) endLive() {
+	if s == nil || !s.Live || s.liveEnded {
 		return
 	}
-	if w, ok := g.Sess.Realm.(watcher); ok {
+	s.liveEnded = true
+	if w := s.Writer; w != nil {
+		w.end(liveEndWait)
+	}
+	if w, ok := s.Realm.(watcher); ok {
 		w.Stop()
+	}
+	for deadline := time.Now().Add(liveEndWait); s.Hud.EndStoneJobs() && time.Now().Before(deadline); {
+		time.Sleep(5 * time.Millisecond)
+	}
+	s.stepForwards()
+	if s.Writer != nil {
+		s.stepWriter()
 	}
 }
 
 func (g *Game) leaveLive() {
 	if g.Sess != nil && g.Sess.Live {
 		if g.Opts.Capture == "" {
-			ApplyNames(g.Settings.TrueNames)
+			on := g.Settings.TrueNames
+			if g.Opts.LiveOnly {
+				on = g.liveNames()
+			}
+			ApplyNames(on)
 		}
 		g.stopWatching()
 		g.Sess, g.campaign = g.campaign, nil
@@ -294,7 +332,7 @@ func (g *Game) leaveLive() {
 func liveContexts(list []live.ContextInfo) []hud.LiveContext {
 	out := make([]hud.LiveContext, len(list))
 	for i, c := range list {
-		out[i] = hud.LiveContext{Name: c.Name, Cluster: c.Cluster, Server: c.Server, User: c.User, Namespace: c.Namespace}
+		out[i] = hud.LiveContext{Name: c.Name, Cluster: c.Cluster, Server: c.Server, User: c.User, Namespace: c.Namespace, Identity: c.Identity, Facets: c.Facets, ClusterID: c.ClusterID}
 	}
 	return out
 }

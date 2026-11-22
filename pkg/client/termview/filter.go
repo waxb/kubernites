@@ -5,129 +5,173 @@ import (
 	"strings"
 	"unicode"
 	"unicode/utf8"
-)
 
-const (
-	ground = iota
-	escape
-	control
+	"github.com/charmbracelet/x/ansi"
+	"github.com/charmbracelet/x/ansi/parser"
 )
 
 const (
 	pieceBudget = 2048
-	maxSequence = 128
+	maxString   = 64 << 10
+	maxCluster  = 32
+	maxMarks    = 32
+	maxNumber   = 99999
 )
 
 type filter struct {
-	state int
-	need  int
-	r     []byte
-	marks int
-	seq   []byte
-	piece []byte
-	cost  int
+	p       *ansi.Parser
+	cols    int
+	rows    int
+	out     func([]byte, int)
+	piece   []byte
+	cost    int
+	marks   int
+	cluster int
 }
 
-func (f *filter) feed(p []byte, cols, rows int, out func([]byte)) {
-	flush := func() {
-		if len(f.piece) > 0 {
-			out(f.piece)
-			f.piece, f.cost = nil, 0
-		}
-	}
-	emit := func(b []byte, cost int) {
-		if f.cost > 0 && f.cost+cost > pieceBudget {
-			flush()
-		}
-		f.piece = append(f.piece, b...)
-		f.cost += cost
-		if f.cost >= pieceBudget {
-			flush()
-		}
-	}
+func newFilter() *filter {
+	f := &filter{p: ansi.NewParser()}
+	f.p.SetParamsSize(parser.MaxParamsSize)
+	f.p.SetDataSize(maxString)
+	f.p.SetHandler(ansi.Handler{
+		Print:     f.print,
+		Execute:   f.execute,
+		HandleCsi: f.csi,
+		HandleEsc: f.esc,
+		HandleDcs: func(ansi.Cmd, ansi.Params, []byte) { f.drop() },
+		HandleOsc: f.osc,
+		HandleApc: func([]byte) { f.drop() },
+		HandlePm:  func([]byte) { f.drop() },
+		HandleSos: func([]byte) { f.drop() },
+	})
+	return f
+}
+
+func (f *filter) feed(p []byte, cols, rows int, out func([]byte, int)) {
+	f.cols, f.rows, f.out = max(cols, 1), max(rows, 1), out
 	for _, b := range p {
-		switch f.state {
-		case ground:
-			f.ground(b, emit)
-		case escape:
-			if b == '[' {
-				f.state, f.seq = control, append(f.seq, b)
-				continue
-			}
-			f.state = ground
-			emit(append(f.seq, b), 1)
-		case control:
-			switch {
-			case b >= 0x40 && b <= 0x7e:
-				f.state = ground
-				seq, cost := clamp(append(f.seq, b), cols, rows)
-				emit(seq, cost)
-			case b >= 0x20 && b <= 0x3f:
-				if len(f.seq) < maxSequence {
-					f.seq = append(f.seq, b)
-				}
-			case b == 0x1b:
-				f.seq = append(f.seq[:0], b)
-				f.state = escape
-			case b == 0x18 || b == 0x1a:
-				f.state = ground
-				emit([]byte{b}, 1)
-			case b < 0x20:
-				emit([]byte{b}, 1)
-			case b == 0x7f:
-			default:
-				f.state = ground
-				f.ground(b, emit)
-			}
-		}
+		f.p.Advance(b)
 	}
-	flush()
+	f.flush()
+	f.out = nil
 }
 
-func (f *filter) ground(b byte, emit func([]byte, int)) {
-	if f.need > 0 {
-		if b&0xc0 == 0x80 {
-			f.need--
-			f.r = append(f.r, b)
-			if f.need == 0 {
-				f.char(emit)
-			}
-			return
-		}
-		f.need = 0
-		emit(f.r, len(f.r))
-		f.r = f.r[:0]
+func (f *filter) flush() {
+	if len(f.piece) > 0 {
+		f.out(f.piece, f.cost)
+		f.piece, f.cost = nil, 0
 	}
-	switch {
-	case b == 0x1b:
-		f.marks = 0
-		f.state, f.seq = escape, append(f.seq[:0], b)
-	case b == 0x9b:
-		f.marks = 0
-		f.state, f.seq = control, append(f.seq[:0], 0x1b, '[')
-	case b >= 0xc2 && b <= 0xdf:
-		f.need, f.r = 1, append(f.r[:0], b)
-	case b >= 0xe0 && b <= 0xef:
-		f.need, f.r = 2, append(f.r[:0], b)
-	case b >= 0xf0 && b <= 0xf4:
-		f.need, f.r = 3, append(f.r[:0], b)
-	default:
-		f.marks = 0
-		emit([]byte{b}, 1)
-	}
+	f.cluster, f.marks = 0, 0
 }
 
-func (f *filter) char(emit func([]byte, int)) {
-	r, _ := utf8.DecodeRune(f.r)
+func (f *filter) emit(b []byte, cost int) {
+	if f.cost > 0 && f.cost+cost > pieceBudget {
+		marks, cluster := f.marks, f.cluster
+		f.flush()
+		f.marks, f.cluster = marks, cluster
+	}
+	f.piece = append(f.piece, b...)
+	f.cost += cost
+}
+
+func (f *filter) screen() int {
+	return f.cols * f.rows
+}
+
+func (f *filter) print(r rune) {
+	if r < utf8.RuneSelf {
+		f.marks, f.cluster = 0, 1
+		f.emit([]byte{byte(r)}, 1+f.rows)
+		return
+	}
 	if extending(r) {
 		f.marks++
 	} else {
 		f.marks = 0
 	}
-	if f.marks <= maxMarks {
-		emit(f.r, 1)
+	if f.marks > maxMarks {
+		return
 	}
-	f.r = f.r[:0]
+	if f.cluster >= maxCluster {
+		f.emit([]byte{0}, 1)
+		f.cluster = 0
+	}
+	f.cluster++
+	f.emit(utf8.AppendRune(nil, r), 1+f.rows)
+}
+
+func (f *filter) boundary() {
+	f.marks, f.cluster = 0, 0
+}
+
+func (f *filter) execute(b byte) {
+	f.boundary()
+	switch b {
+	case ansi.ESC:
+		f.emit([]byte{0}, 1)
+	case ansi.LF, ansi.VT, ansi.FF, ansi.IND, ansi.NEL, ansi.RI:
+		f.emit([]byte{b}, f.screen())
+	default:
+		f.emit([]byte{b}, 1)
+	}
+}
+
+func (f *filter) drop() {
+	f.boundary()
+	f.emit([]byte{0}, 1)
+}
+
+func (f *filter) esc(cmd ansi.Cmd) {
+	if fin := cmd.Final(); fin < 0x30 || fin > 0x7e || cmd.Intermediate() == 0 && strings.IndexByte("[]PX^_", fin) >= 0 {
+		f.drop()
+		return
+	}
+	f.boundary()
+	seq := []byte{ansi.ESC}
+	if i := cmd.Intermediate(); i != 0 {
+		seq = append(seq, i)
+	}
+	seq = append(seq, cmd.Final())
+	cost := 1
+	if cmd.Intermediate() == 0 {
+		switch cmd.Final() {
+		case 'c', 'D', 'M':
+			cost = f.screen()
+		}
+	}
+	f.emit(seq, cost)
+}
+
+var actedOSC = map[int]bool{10: true, 11: true, 12: true, 110: true, 111: true, 112: true}
+
+func (f *filter) osc(cmd int, data []byte) {
+	if cmd != oscCommand(data) || !actedOSC[cmd] {
+		f.drop()
+		return
+	}
+	f.str("\x1b]", nil, data)
+}
+
+func oscCommand(data []byte) int {
+	cmd := parser.MissingCommand
+	for _, d := range data {
+		if d < '0' || d > '9' {
+			break
+		}
+		if cmd == parser.MissingCommand {
+			cmd = 0
+		}
+		cmd = cmd*10 + int(d-'0')
+	}
+	return cmd
+}
+
+func (f *filter) str(intro string, head, data []byte) {
+	f.boundary()
+	seq := append([]byte(intro), head...)
+	seq = append(seq, data...)
+	seq = append(seq, ansi.ST)
+	f.emit(seq, 1+len(data))
 }
 
 func extending(r rune) bool {
@@ -140,82 +184,112 @@ func extending(r rune) bool {
 	return false
 }
 
-func clamp(seq []byte, cols, rows int) ([]byte, int) {
-	body := string(seq[2:])
-	final := body[len(body)-1]
-	params := body[:len(body)-1]
-	if params != "" && strings.ContainsRune("<=>?", rune(params[0])) || strings.IndexFunc(params, func(r rune) bool { return r >= 0x20 && r <= 0x2f }) >= 0 {
-		return capDigits(seq), 1
+func paramValues(params ansi.Params) []int {
+	vals := make([]int, len(params))
+	for i, p := range params {
+		vals[i] = p.Param(-1)
+		if vals[i] == -1 && int(p)&parser.ParamMask == parser.MissingParam && int(p) != parser.MissingParam && int(p) != parser.MissingParam|parser.HasMoreFlag {
+			vals[i] = maxNumber
+		}
 	}
-	limit, per := 0, 0
-	switch final {
-	case 'b':
-		limit, per = cols*rows, 1
-	case 'I', 'Z', 'X', '@', 'P':
-		limit, per = cols, 1
-	case 'L', 'M', 'S', 'T':
-		limit, per = rows, cols
-	case 'A', 'B', 'C', 'D', 'E', 'F', 'G', 'd', 'e', 'a', '`', 'H', 'f', 'r', 's':
-		limit = max(cols, rows)
-	default:
-		return capDigits(seq), 1
+	return vals
+}
+
+func (f *filter) clamp(cmd ansi.Cmd, params ansi.Params) ([]int, int) {
+	vals := paramValues(params)
+	cols, rows := f.cols, f.rows
+	limitAll := func(n int) {
+		for i := range vals {
+			vals[i] = min(vals[i], n)
+		}
 	}
-	limit = max(limit, 1)
+	count := func() int {
+		if len(vals) == 0 || vals[0] < 0 {
+			return 1
+		}
+		return max(vals[0], 1)
+	}
 	cost := 1
-	var out strings.Builder
-	out.WriteString("\x1b[")
-	start := 0
-	for i := 0; i <= len(params); i++ {
-		if i < len(params) && params[i] != ';' && params[i] != ':' {
-			continue
-		}
-		field := params[start:i]
-		if n, ok := number(field); ok {
-			n = min(n, limit)
-			field = strconv.Itoa(n)
-			cost = max(cost, n*per)
-		}
-		out.WriteString(field)
-		if i < len(params) {
-			out.WriteByte(params[i])
-		}
-		start = i + 1
-	}
-	out.WriteByte(final)
-	return []byte(out.String()), cost
-}
-
-func number(s string) (int, bool) {
-	if s == "" {
-		return 0, false
-	}
-	n := 0
-	for _, r := range s {
-		if r < '0' || r > '9' {
-			return 0, false
-		}
-		if n < 1<<20 {
-			n = n*10 + int(r-'0')
-		}
-	}
-	return n, true
-}
-
-func capDigits(seq []byte) []byte {
-	var out []byte
-	run := 0
-	for _, b := range seq {
-		if b >= '0' && b <= '9' {
-			run++
-			if run > 5 {
-				continue
+	if cmd.Prefix() == 0 && cmd.Intermediate() == 0 {
+		switch cmd.Final() {
+		case 'b':
+			limitAll(f.screen())
+			cost = count() * (1 + rows)
+		case '@', 'P', 'K', 'g':
+			limitAll(cols)
+			cost = cols
+		case 'X', 'I', 'Z':
+			limitAll(cols)
+			cost = count()
+		case 'L', 'M', 'S', 'T', 'J':
+			limitAll(rows)
+			cost = f.screen()
+		case 'A', 'B', 'E', 'F', 'd', 'e', 'r':
+			limitAll(rows)
+		case 'C', 'D', 'G', 'a', '`', 's':
+			limitAll(cols)
+		case 'H', 'f':
+			limitAll(cols)
+			if len(vals) > 0 {
+				vals[0] = min(vals[0], rows)
 			}
-		} else {
-			run = 0
 		}
-		out = append(out, b)
 	}
-	return out
+	if cmd.Prefix() == '?' && cmd.Intermediate() == 0 && (cmd.Final() == 'h' || cmd.Final() == 'l') {
+		for _, v := range vals {
+			switch v {
+			case 47, 1047, 1049:
+				cost += f.screen()
+			}
+		}
+	}
+	if cmd.Prefix() == '?' && cmd.Intermediate() == 0 && cmd.Final() == 'W' {
+		cost = cols
+	}
+	limitAll(maxNumber)
+	return vals, cost
 }
 
-const maxMarks = 32
+func (f *filter) csi(cmd ansi.Cmd, params ansi.Params) {
+	if fin := cmd.Final(); fin < 0x40 || fin > 0x7e {
+		f.drop()
+		return
+	}
+	f.boundary()
+	vals, cost := f.clamp(cmd, params)
+	seq := []byte{ansi.ESC, '['}
+	if p := cmd.Prefix(); p != 0 {
+		seq = append(seq, p)
+	}
+	seq = appendParams(seq, params, vals)
+	if i := cmd.Intermediate(); i != 0 {
+		seq = append(seq, i)
+	}
+	seq = append(seq, cmd.Final())
+	f.emit(seq, cost)
+}
+
+func appendParams(seq []byte, params ansi.Params, vals []int) []byte {
+	if vals == nil {
+		vals = paramValues(params)
+		for i := range vals {
+			vals[i] = min(vals[i], maxNumber)
+		}
+	}
+	for i, p := range params {
+		if v := vals[i]; v >= 0 {
+			seq = strconv.AppendInt(seq, int64(v), 10)
+		}
+		if i < len(params)-1 {
+			if p.HasMore() {
+				seq = append(seq, ':')
+			} else {
+				seq = append(seq, ';')
+			}
+		}
+	}
+	if len(params) == parser.MaxParamsSize {
+		seq = append(seq, ';')
+	}
+	return seq
+}

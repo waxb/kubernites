@@ -1,7 +1,9 @@
 package hud
 
 import (
+	"fmt"
 	"strings"
+	"unicode"
 
 	"github.com/hajimehoshi/ebiten/v2"
 
@@ -77,6 +79,22 @@ type liveWrites struct {
 	form    *OrderForm
 	focus   int
 	choices []LiveChoice
+	stage   string
+	seen    int
+}
+
+func orderStage(f OrderForm) string {
+	return fmt.Sprintf("%d\x00%s\x00%s\x00%d\x00%v\x00%v\x00%v\x00%s\x00%s\x00%q\x00%v", f.ID, f.Title, f.Go, f.GoKey, f.GoOff, f.Warning, f.Bad, f.Verdict, f.Note, f.Lines, f.Changes)
+}
+
+func (h *HUD) seeOrder() {
+	if h.OverlayID == OverlayLiveOrder && h.lw.form != nil {
+		h.lw.seen++
+	}
+}
+
+func (h *HUD) orderSeen() bool {
+	return h.lw.seen >= AskSeenFrames
 }
 
 var ChordKeys = map[string]ebiten.Key{
@@ -159,8 +177,12 @@ func (h *HUD) liveChord(in Input, f Frame) ([]Intent, bool) {
 			continue
 		}
 		pressed = true
+		r, ok := in.ChordRune(k)
+		if !ok {
+			continue
+		}
 		for _, o := range h.lw.orders {
-			if key, ok := ChordKeys[o.Chord]; !ok || key != k {
+			if _, known := ChordKeys[o.Chord]; !known || strings.ToLower(o.Chord) != string(r) {
 				continue
 			}
 			if o.Disabled {
@@ -185,12 +207,16 @@ func (h *HUD) OpenOrder(form OrderForm) {
 			}
 		}
 	}
+	if stage := orderStage(form); h.lw.form == nil || stage != h.lw.stage {
+		h.lw.stage, h.lw.seen = stage, 0
+	}
 	h.lw.form = &form
 	h.OverlayID = OverlayLiveOrder
 }
 
 func (h *HUD) CloseOrder() {
 	h.lw.form = nil
+	h.lw.stage, h.lw.seen = "", 0
 	if h.OverlayID == OverlayLiveOrder {
 		h.OverlayID = OverlayNone
 	}
@@ -226,7 +252,99 @@ const (
 )
 
 func (h *HUD) orderInputRect(i int) ui.Rect {
-	return ui.Rect{X: OrderBox.X + orderFieldX, Y: OrderBox.Y + orderRowY + i*orderRowH, W: orderFieldW, H: orderRowH - 4}
+	r := h.orderBox()
+	return ui.Rect{X: r.X + orderFieldX, Y: r.Y + orderRowY + i*orderRowH, W: orderFieldW, H: orderRowH - 4}
+}
+
+const (
+	orderBottom  = 62
+	orderLeast   = 150
+	orderLineMax = 5
+)
+
+func balancedWrap(f ui.Font, text string, width, maxLines int) []string {
+	lines := f.WrapLines(text, width, 1, maxLines)
+	if len(lines) < 2 || len(f.Wrap(text, width, 1)) > maxLines {
+		return lines
+	}
+	best, clause := lines, []string(nil)
+	for w := width; w > 12*ui.Advance; w -= ui.Advance {
+		try := f.Wrap(text, w, 1)
+		if len(try) != len(lines) {
+			break
+		}
+		best = try
+		for _, c := range [][]string{try, sentenceWrap(f, text, w)} {
+			if len(c) == len(lines) && atClauses(c) {
+				clause = c
+			}
+		}
+	}
+	if clause != nil {
+		return clause
+	}
+	return best
+}
+
+func sentenceWrap(f ui.Font, text string, width int) []string {
+	var out []string
+	start := 0
+	for i := 1; i+2 < len(text); i++ {
+		if strings.ContainsRune(".!?", rune(text[i])) && text[i+1] == ' ' && unicode.IsUpper(rune(text[i+2])) {
+			out = append(out, f.Wrap(text[start:i+1], width, 1)...)
+			start = i + 2
+		}
+	}
+	return append(out, f.Wrap(text[start:], width, 1)...)
+}
+
+func atClauses(lines []string) bool {
+	for _, l := range lines[:len(lines)-1] {
+		if l == "" || !strings.ContainsRune(",;:.", rune(l[len(l)-1])) {
+			return false
+		}
+	}
+	return true
+}
+
+func (h *HUD) orderBody(r ui.Rect) []string {
+	var out []string
+	for _, l := range h.lw.form.Lines {
+		out = append(out, balancedWrap(h.Font, l, r.W-32, orderLineMax)...)
+	}
+	return out
+}
+
+func (h *HUD) orderTop(r ui.Rect) int {
+	form := h.lw.form
+	y := r.Y + 32 + ui.LineHeight + 2
+	if form.Verdict != "" {
+		y += len(balancedWrap(h.Font, form.Verdict, r.W-32, 2)) * ui.LineHeight
+	}
+	if len(form.Inputs) > 0 {
+		y = max(y, r.Y+orderRowY-6)
+		y = max(y, r.Y+orderRowY+len(form.Inputs)*orderRowH)
+	} else {
+		y += ui.LineHeight
+	}
+	return y
+}
+
+func (h *HUD) orderBox() ui.Rect {
+	form := h.lw.form
+	if form == nil {
+		return OrderBox
+	}
+	r := OrderBox
+	y := h.orderTop(r) + len(h.orderBody(r))*ui.LineHeight
+	if len(form.Changes) > 0 {
+		y += 2 + (1+len(form.Changes))*ui.LineHeight
+	}
+	for _, p := range form.Progress {
+		y += len(balancedWrap(liveFont, p, r.W-32, 3)) * ui.LineHeight
+	}
+	r.H = min(OrderBox.H, max(orderLeast, y-r.Y+orderBottom))
+	return r
 }
 
 func (h *HUD) orderButtons() []Button {
@@ -234,7 +352,7 @@ func (h *HUD) orderButtons() []Button {
 	if form == nil {
 		return []Button{closeButtonAs(OrderBox, LiveOrderPrefix+":scroll:close", "Close, nothing sent [Esc]")}
 	}
-	r := OrderBox
+	r := h.orderBox()
 	y := r.Y + r.H - 28
 	out := []Button{closeButtonAs(r, LiveOrderPrefix+":scroll:close", "Close, nothing sent [Esc]")}
 	cancel := Button{ID: LiveOrderPrefix + ":scroll:" + ScrollCancel, Rect: ui.Rect{X: r.X + 16, Y: y, W: 110, H: 18}, Label: "CANCEL", Tip: "Close, nothing sent [Esc]"}
@@ -270,6 +388,9 @@ func (h *HUD) pressOrderScroll(rest string) []Intent {
 	case rest == "scroll:"+ScrollGo:
 		if form.GoOff {
 			return []Intent{{Kind: IntentSound, Command: "error"}}
+		}
+		if !h.orderSeen() {
+			return nil
 		}
 		return h.scrollIntent(ScrollGo)
 	case strings.HasPrefix(rest, "field:"):
@@ -327,7 +448,7 @@ func (h *HUD) orderKeys(in Input) ([]Intent, bool) {
 		h.lw.focus = (h.lw.focus + 1) % len(form.Inputs)
 		return nil, true
 	case in.Pressed(ebiten.KeyEnter) || in.Pressed(ebiten.KeyNumpadEnter):
-		if form.GoKey == ebiten.KeyEnter && !form.GoOff && form.Go != "" {
+		if form.GoKey == ebiten.KeyEnter && !form.GoOff && form.Go != "" && h.orderSeen() {
 			return h.scrollIntent(ScrollGo), true
 		}
 		return nil, true
@@ -345,7 +466,7 @@ func (h *HUD) orderKeys(in Input) ([]Intent, bool) {
 		}
 		return nil, len(in.Keys) > 0 || len(in.Chars) > 0
 	}
-	if form.GoKey == ebiten.KeyY && in.Pressed(ebiten.KeyY) && !in.Control && !form.GoOff && form.Go != "" {
+	if form.GoKey == ebiten.KeyY && in.PressedLetter('y') && !in.Control && !form.GoOff && form.Go != "" && h.orderSeen() {
 		return h.scrollIntent(ScrollGo), true
 	}
 	return nil, len(in.Keys) > 0 || len(in.Chars) > 0
@@ -357,7 +478,7 @@ func (h *HUD) drawOrderScroll(dst *ebiten.Image, f Frame) {
 		return
 	}
 	ui.Fill(dst, Overlay, ui.Tint(ui.Palette.Shadow, reforgeDim))
-	r := OrderBox
+	r := h.orderBox()
 	ui.DarkPanel(dst, r)
 	titleClr := ui.Palette.GoldBright
 	if form.Warning {
@@ -373,12 +494,16 @@ func (h *HUD) drawOrderScroll(dst *ebiten.Image, f Frame) {
 		if strings.HasPrefix(form.Verdict, "!") {
 			clr = ui.Palette.RedText
 		}
-		for _, l := range h.Font.WrapLines(form.Verdict, r.W-32, 1, 2) {
+		for _, l := range balancedWrap(h.Font, form.Verdict, r.W-32, 2) {
 			h.Font.Draw(dst, l, x, y, 1, clr)
 			y += ui.LineHeight
 		}
 	}
-	y = max(y, r.Y+orderRowY-6)
+	if len(form.Inputs) > 0 {
+		y = max(y, r.Y+orderRowY-6)
+	} else {
+		y += ui.LineHeight
+	}
 	for i, in := range form.Inputs {
 		ry := r.Y + orderRowY + i*orderRowH
 		h.Font.Draw(dst, in.Label, x, ry+4, 1, ui.Palette.Gold)
@@ -406,11 +531,9 @@ func (h *HUD) drawOrderScroll(dst *ebiten.Image, f Frame) {
 		}
 		y = ry + orderRowH
 	}
-	for _, l := range form.Lines {
-		for _, w := range h.Font.WrapLines(l, r.W-32, 1, 5) {
-			h.Font.Draw(dst, w, x, y, 1, ui.Palette.Cream)
-			y += ui.LineHeight
-		}
+	for _, w := range h.orderBody(r) {
+		h.Font.Draw(dst, w, x, y, 1, ui.Palette.Cream)
+		y += ui.LineHeight
 	}
 	if len(form.Changes) > 0 {
 		y += 2
@@ -429,7 +552,7 @@ func (h *HUD) drawOrderScroll(dst *ebiten.Image, f Frame) {
 		}
 	}
 	for _, p := range form.Progress {
-		for _, w := range liveFont.WrapLines(p, r.W-32, 1, 3) {
+		for _, w := range balancedWrap(liveFont, p, r.W-32, 3) {
 			liveFont.Draw(dst, w, x, y, 1, ui.Palette.TextDim)
 			y += ui.LineHeight
 		}
@@ -442,7 +565,7 @@ func (h *HUD) drawOrderScroll(dst *ebiten.Image, f Frame) {
 		if form.Bad {
 			clr = ui.Palette.RedText
 		}
-		lines := h.Font.WrapLines(form.Note, r.W-32, 1, 2)
+		lines := balancedWrap(h.Font, form.Note, r.W-32, 2)
 		for i, l := range lines {
 			h.Font.Draw(dst, l, x, r.Y+r.H-46+i*ui.LineHeight-(len(lines)-1)*ui.LineHeight, 1, clr)
 		}

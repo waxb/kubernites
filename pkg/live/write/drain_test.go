@@ -85,6 +85,10 @@ func TestADrainWaitsOnABudgetRetriesAndNeverRetriesAConflict(t *testing.T) {
 	if tries["/api/v1/namespaces/shop/pods/web-1/eviction"] != 3 {
 		t.Errorf("the blocked eviction was tried %d times", tries["/api/v1/namespaces/shop/pods/web-1/eviction"])
 	}
+	if len(reports) != 5 || reports[0].Cordon != "kind-worker" || !reports[0].Done {
+		t.Fatalf("the drain's cordon is not its first report: %+v", reports)
+	}
+	reports = reports[1:]
 	if len(reports) != 4 || reports[0].Failed == "" || !strings.Contains(reports[1].Blocked, "The disruption budget web needs 1") || !reports[3].Done {
 		t.Fatalf("reports %+v", reports)
 	}

@@ -68,7 +68,7 @@ func (m Mask) Near(x, y, reach int) bool {
 }
 
 func newEntry(sheet *ebiten.Image, img *image.NRGBA, r art.Region) entry {
-	return entry{sheet: sheet, region: r, top: ContentTop(img, r), mask: MaskOf(img, r)}
+	return entry{sheet: sheet, region: r, top: ContentTop(img, r), bottom: ContentBottom(img, r), mask: MaskOf(img, r)}
 }
 
 func (l *Library) Mask(name string) (Mask, bool) {

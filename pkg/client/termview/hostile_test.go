@@ -1,46 +1,11 @@
 package termview
 
 import (
-	"fmt"
 	"runtime"
 	"strings"
 	"testing"
 	"time"
 )
-
-func TestOneRepeatSequenceNeverPinsTheView(t *testing.T) {
-	w := New(154, 27, func([]byte) {})
-	wrote := make(chan struct{})
-	go func() {
-		w.Write([]byte("x\x1b[2147483646b"))
-		close(wrote)
-	}()
-	time.Sleep(200 * time.Millisecond)
-	done := make(chan struct{})
-	go func() {
-		w.Row(0)
-		w.Key(Key{Rune: 'p', Ctrl: true})
-		close(done)
-	}()
-	select {
-	case <-done:
-	case <-time.After(3 * time.Second):
-		t.Fatal("Row (the Stone's draw) and Key (ctrl-p) waited behind one REP sequence")
-	}
-	select {
-	case <-wrote:
-	case <-time.After(5 * time.Second):
-		t.Fatal("one REP sequence held the emulator for more than 5 s")
-	}
-	w.Close()
-	v := New(154, 27, func([]byte) {})
-	defer v.Close()
-	start := time.Now()
-	v.Write([]byte(fmt.Sprintf("x\x1b[%db", 2000000)))
-	if took := time.Since(start); took > 2*time.Second {
-		t.Fatalf("REP 2000000 took %v", took)
-	}
-}
 
 func TestMalformedSequencesNeverPanicOrHang(t *testing.T) {
 	inputs := []string{

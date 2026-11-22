@@ -281,7 +281,7 @@ func TestEditOpensTheScriptoriumWithTheLiveYAMLAndForceNeedsItsWarning(t *testin
 		t.Fatal("the live YAML was turned into story words")
 	}
 	h.Script.Editor = NewEditor(strings.Replace(yaml, "replicas: 2", "replicas: 5", 1))
-	h.liveEditKeys(Input{Keys: []ebiten.Key{ebiten.KeyEnter}, Ctrl: true})
+	h.liveEditKeys(Input{Keys: []ebiten.Key{ebiten.KeyEnter}, Ctrl: true, Control: true})
 	if len(f.sent) != 1 || f.forced[0] || !strings.Contains(f.sent[0], "replicas: 5") {
 		t.Fatalf("sent %v forced %v", f.sent, f.forced)
 	}
@@ -377,7 +377,12 @@ func TestAHiddenValueIsRevealedKeyByKey(t *testing.T) {
 	}
 	h, _ := liveHUD(t, true)
 	revealed := []string{}
-	h.backend.Reveal = func(e LiveEdit, key string) (string, bool) { revealed = append(revealed, key); return "Y2VydA==", true }
+	h.backend.Reveal = func(e LiveEdit, key string) <-chan Revealed {
+		revealed = append(revealed, key)
+		ch := make(chan Revealed, 1)
+		ch <- Revealed{Value: "Y2VydA==", OK: true}
+		return ch
+	}
 	h.OpenLiveEdit(LiveEdit{Kind: "Secret", Name: "s", Namespace: "shop", Text: yaml, Hidden: []string{"password", "tls.crt"}})
 	ids := map[string]bool{}
 	for _, b := range h.scriptButtons() {
@@ -387,6 +392,7 @@ func TestAHiddenValueIsRevealedKeyByKey(t *testing.T) {
 		t.Fatalf("no REVEAL per key: %v", ids)
 	}
 	h.pressScript("live:reveal:tls.crt", Frame{})
+	h.pumpKubectl()
 	if len(revealed) != 1 || !strings.Contains(h.Script.Editor.Text(), "tls.crt: Y2VydA==") || !strings.Contains(h.Script.Editor.Text(), "password: "+MaskedValue) {
 		t.Fatalf("after one REVEAL (%v):\n%s", revealed, h.Script.Editor.Text())
 	}
@@ -592,5 +598,68 @@ func TestTheDoneCardLeavesNoWordAloneOnItsLastLine(t *testing.T) {
 		if len(rows) > 1 && !strings.Contains(strings.TrimSpace(rows[len(rows)-1]), " ") {
 			t.Errorf("mode %d: the DONE line leaves %q alone: %q", mode, rows[len(rows)-1], rows)
 		}
+	}
+}
+
+func TestAnOrderScrollTakesYEnterOrAClickOnlyOnceEachStageHasBeenDrawn(t *testing.T) {
+	h, _ := liveHUD(t, true)
+	goes := func(in Input) bool {
+		intents, _ := h.orderKeys(in)
+		for _, it := range intents {
+			if it.Kind == IntentLiveScroll && it.Command == ScrollGo {
+				return true
+			}
+		}
+		return false
+	}
+	clicked := func() bool {
+		for _, it := range h.pressOrderScroll("scroll:" + ScrollGo) {
+			if it.Kind == IntentLiveScroll && it.Command == ScrollGo {
+				return true
+			}
+		}
+		return false
+	}
+	y, enter := Input{Keys: []ebiten.Key{ebiten.KeyY}}, Input{Keys: []ebiten.Key{ebiten.KeyEnter}}
+	stages := []struct {
+		form OrderForm
+		key  Input
+	}{
+		{OrderForm{ID: 1, Title: "SCALE", Go: "PREVIEW [ENTER]", GoKey: ebiten.KeyEnter}, enter},
+		{OrderForm{ID: 1, Title: "SCALE", Go: "CONFIRM [Y]", GoKey: ebiten.KeyY, Verdict: "allowed", Changes: []OrderChange{{Label: "replicas", Before: "2", After: "3"}}}, y},
+		{OrderForm{ID: 2, Title: "! DESTROYING MORE THAN ONE THING !", Warning: true, Locked: true, Go: "I UNDERSTAND [Y]", GoKey: ebiten.KeyY}, y},
+		{OrderForm{ID: 2, Title: "DELETE", Go: "DELETE [Y]", GoKey: ebiten.KeyY}, y},
+	}
+	for _, st := range stages {
+		h.OpenOrder(st.form)
+		h.seeOrder()
+		if goes(st.key) || clicked() {
+			t.Fatalf("%s %q went in the frame it was first drawn", st.form.Title, st.form.Go)
+		}
+		for range AskSeenFrames - 2 {
+			h.seeOrder()
+		}
+		h.OpenOrder(st.form)
+		if goes(st.key) || clicked() {
+			t.Fatalf("%s %q went after %d frames", st.form.Title, st.form.Go, AskSeenFrames-1)
+		}
+		h.seeOrder()
+		if !goes(st.key) || !clicked() {
+			t.Fatalf("%s %q did not go after %d frames", st.form.Title, st.form.Go, AskSeenFrames)
+		}
+	}
+}
+
+func TestTheScriptoriumSendsOnControlEnterAndNeverOnCmdEnter(t *testing.T) {
+	h, f := liveHUD(t, true)
+	h.SetLive(LiveCard{Context: "kind-kind", Who: "admin", Level: LevelSeamless})
+	h.OpenLiveEdit(LiveEdit{Ref: "deployments.apps/web", Kind: "Deployment", Name: "web", Namespace: "shop", Text: "kind: Deployment\n"})
+	h.liveEditKeys(Input{Ctrl: true, Keys: []ebiten.Key{ebiten.KeyEnter}})
+	if len(f.sent) != 0 {
+		t.Fatalf("Cmd+Enter sent %v", f.sent)
+	}
+	h.liveEditKeys(Input{Ctrl: true, Control: true, Keys: []ebiten.Key{ebiten.KeyEnter}})
+	if len(f.sent) != 1 {
+		t.Fatal("Control+Enter did not send")
 	}
 }

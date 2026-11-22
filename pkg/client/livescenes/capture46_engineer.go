@@ -1,7 +1,6 @@
 package livescenes
 
 import (
-	"errors"
 	"fmt"
 	app "github.com/waxb/kubernites/pkg/client/app"
 	"github.com/waxb/kubernites/pkg/client/hud"
@@ -9,6 +8,8 @@ import (
 	"github.com/waxb/kubernites/pkg/client/render"
 	"github.com/waxb/kubernites/pkg/live"
 	"github.com/waxb/kubernites/pkg/view"
+	"net"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -72,11 +73,16 @@ func init() {
 		})
 	}
 	app.CaptureScenes["engineer-failed"] = engineerPicker(func(p *hud.LivePicker) {
-		p.Failed(errors.New(`Get "https://lab-west.example.internal:6443/version": dial tcp: lookup lab-west.example.internal: no such host`))
+		p.Failed(live.NoAnswer(labWestLookup()))
 	})
 }
 
 var engineerReading = []int{90, 300, 720, 1500}
+
+func labWestLookup() error {
+	host := "lab-west.example.internal"
+	return &url.Error{Op: "Get", URL: "https://" + host + ":6443/version", Err: &net.OpError{Op: "dial", Net: "tcp", Err: &net.DNSError{Err: "no such host", Name: host, IsNotFound: true}}}
+}
 
 func ModuleRoot() string {
 	dir, err := os.Getwd()

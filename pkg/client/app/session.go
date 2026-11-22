@@ -98,6 +98,7 @@ type Session struct {
 	seasons         map[string]int
 	Crews           []model.CrewChain `json:"-"`
 	Writer          *liveWriter       `json:"-"`
+	liveEnded       bool              `json:"-"`
 	hints           bool
 	cycle           PickCycle
 	tipped          map[string]bool
@@ -150,6 +151,11 @@ func NewSession(r client.Realm, lib *gfx.Library) *Session {
 	}
 	s.CenterOn(float64(s.Site.Gate.X), float64(s.Site.Gate.Y))
 	return s
+}
+
+func (s *Session) zoomClosest() {
+	cx, cy := float64(hud.Width)/2, float64(hud.ConsoleY+hud.TopH)/2
+	s.Cam = s.Cam.ZoomAt(render.ZoomLevels[len(render.ZoomLevels)-1], cx, cy).Clamp(s.Site.Width, hud.Width, hud.ConsoleY)
 }
 
 func (s *Session) CenterOn(gx, gy float64) {

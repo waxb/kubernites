@@ -1,0 +1,38 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: deaf-1
+  namespace: reach
+  labels:
+    app: deaf
+spec:
+  terminationGracePeriodSeconds: 1
+  containers:
+  - name: main
+    image: busybox:1.36
+    imagePullPolicy: Never
+    command: ["nc", "-lk", "-p", "8080", "-e", "sleep", "3600"]
+    ports:
+    - containerPort: 8080
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: stuck
+  namespace: reach
+spec:
+  replicas: 1
+  progressDeadlineSeconds: 3600
+  selector:
+    matchLabels:
+      app: stuck
+  template:
+    metadata:
+      labels:
+        app: stuck
+    spec:
+      terminationGracePeriodSeconds: 1
+      containers:
+      - name: main
+        image: busybox:0.0-never-published
+        imagePullPolicy: Never

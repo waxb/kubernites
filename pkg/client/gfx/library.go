@@ -15,6 +15,7 @@ type entry struct {
 	sheet  *ebiten.Image
 	region art.Region
 	top    int
+	bottom int
 	mask   Mask
 }
 
@@ -54,6 +55,17 @@ func ContentTop(img *image.NRGBA, r art.Region) int {
 	return r.H
 }
 
+func ContentBottom(img *image.NRGBA, r art.Region) int {
+	for y := r.H - 1; y >= 0; y-- {
+		for x := 0; x < r.W; x++ {
+			if img.NRGBAAt(r.X+x, r.Y+y).A > 0 {
+				return y + 1
+			}
+		}
+	}
+	return 0
+}
+
 func (l *Library) entry(name string) (entry, bool) {
 	if l == nil {
 		return entry{}, false
@@ -70,6 +82,14 @@ func (l *Library) Headroom(name string) (int, bool) {
 		return 0, false
 	}
 	return e.region.AnchorY - e.top, true
+}
+
+func (l *Library) Extent(name string) (int, int, bool) {
+	e, ok := l.entry(name)
+	if !ok {
+		return 0, 0, false
+	}
+	return e.region.AnchorY - e.top, e.bottom - e.region.AnchorY, true
 }
 
 func (l *Library) Has(name string) bool {

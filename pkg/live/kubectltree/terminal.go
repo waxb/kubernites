@@ -3,11 +3,28 @@ package kubectltree
 import (
 	"io"
 	"sync"
+	"time"
 
 	"k8s.io/client-go/tools/remotecommand"
 )
 
 const LeaveKeys = "ctrl-p,ctrl-q"
+
+const (
+	MaxQueued  = 64 << 10
+	LeaveGrace = 500 * time.Millisecond
+	leaveFirst = 0x10
+	leaveLast  = 0x11
+)
+
+const (
+	typedGround = iota
+	typedEscape
+	typedControl
+	typedString
+	typedStringEnd
+	typedSS3
+)
 
 type Terminal struct {
 	mu      sync.Mutex
@@ -22,6 +39,12 @@ type Terminal struct {
 	tty     bool
 	closed  bool
 	out     io.Writer
+	failed  error
+	stop    func()
+	left    bool
+	armed   bool
+	typed   int
+	seq     []byte
 }
 
 func NewTerminal(cols, rows int, out io.Writer) *Terminal {
@@ -35,12 +58,152 @@ func (t *Terminal) Type(b []byte) {
 		return
 	}
 	t.mu.Lock()
-	defer t.mu.Unlock()
-	if t.closed {
+	if t.closed || t.left {
+		t.mu.Unlock()
 		return
 	}
-	t.keys = append(t.keys, b...)
+	for _, c := range b {
+		if t.typedByte(c) {
+			t.left, t.armed, t.seq = true, false, nil
+			stop := t.stop
+			drained := len(t.keys) == 0
+			t.wake.Broadcast()
+			t.mu.Unlock()
+			if stop != nil {
+				if drained {
+					stop()
+				} else {
+					time.AfterFunc(LeaveGrace, stop)
+				}
+			}
+			return
+		}
+	}
+	if t.typed != typedGround {
+		if t.armed {
+			t.disarm()
+		}
+		t.typed, t.seq = typedGround, t.seq[:0]
+	}
 	t.wake.Broadcast()
+	t.mu.Unlock()
+}
+
+func (t *Terminal) queue(b ...byte) {
+	room := MaxQueued - len(t.keys)
+	if room <= 0 {
+		return
+	}
+	if len(b) > room {
+		b = b[:room]
+	}
+	t.keys = append(t.keys, b...)
+}
+
+func (t *Terminal) disarm() {
+	if t.armed {
+		t.armed = false
+		t.queue(leaveFirst)
+		t.queue(t.seq...)
+	}
+	t.seq = t.seq[:0]
+}
+
+func (t *Terminal) inSequence(c byte) {
+	if t.armed {
+		t.seq = append(t.seq, c)
+	} else {
+		t.queue(c)
+	}
+}
+
+func (t *Terminal) sequenceEnds(reply bool) {
+	t.typed = typedGround
+	if !t.armed {
+		return
+	}
+	if !reply {
+		t.disarm()
+		return
+	}
+	t.queue(t.seq...)
+	t.seq = t.seq[:0]
+}
+
+func (t *Terminal) typedByte(c byte) bool {
+	switch t.typed {
+	case typedEscape:
+		t.inSequence(c)
+		switch c {
+		case '[':
+			t.typed = typedControl
+		case ']', 'P', '_', '^', 'X':
+			t.typed = typedString
+		case 'O':
+			t.typed = typedSS3
+		default:
+			t.sequenceEnds(false)
+		}
+		return false
+	case typedSS3:
+		t.inSequence(c)
+		t.sequenceEnds(false)
+		return false
+	case typedControl:
+		t.inSequence(c)
+		switch {
+		case c >= 0x40 && c <= 0x7e:
+			t.sequenceEnds(replyFinal(c))
+		case len(t.seq) > maxReply:
+			t.sequenceEnds(false)
+		}
+		return false
+	case typedString, typedStringEnd:
+		t.inSequence(c)
+		switch {
+		case c == 0x07, t.typed == typedStringEnd && c == '\\':
+			t.sequenceEnds(true)
+		case c == 0x1b:
+			t.typed = typedStringEnd
+		case len(t.seq) > maxReply:
+			t.sequenceEnds(false)
+		default:
+			t.typed = typedString
+		}
+		return false
+	}
+	switch {
+	case c == 0x1b:
+		t.typed = typedEscape
+		t.inSequence(c)
+	case c == leaveLast && t.armed:
+		t.armed = false
+		t.seq = t.seq[:0]
+		return true
+	case c == leaveFirst:
+		t.disarm()
+		t.armed = true
+	default:
+		t.disarm()
+		t.queue(c)
+	}
+	return false
+}
+
+const maxReply = 256
+
+func replyFinal(c byte) bool {
+	switch c {
+	case 'R', 'c', 'n', 'y', 't', 'I', 'O':
+		return true
+	}
+	return false
+}
+
+func (t *Terminal) Left() bool {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.left
 }
 
 func (t *Terminal) Resize(cols, rows int) {
@@ -85,7 +248,35 @@ func (t *Terminal) open(tty, nudge bool) {
 	t.tty, t.nudge = tty, nudge
 	t.keys = nil
 	t.sent = false
+	t.failed, t.stop = nil, nil
+	t.left, t.armed, t.typed, t.seq = false, false, typedGround, nil
 	t.active = !t.closed
+}
+
+func (t *Terminal) stopWith(stop func()) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.stop = stop
+}
+
+func (t *Terminal) Failed() error {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.failed
+}
+
+func (t *Terminal) fail(err error) {
+	t.mu.Lock()
+	if t.failed == nil {
+		t.failed = err
+	}
+	stop := t.stop
+	t.active = false
+	t.wake.Broadcast()
+	t.mu.Unlock()
+	if stop != nil {
+		stop()
+	}
 }
 
 func (t *Terminal) end() {
@@ -99,10 +290,13 @@ func (t *Terminal) Read(p []byte) (int, error) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	t.live = t.active
-	for len(t.keys) == 0 && t.active {
+	for len(t.keys) == 0 && t.active && !t.left {
 		t.wake.Wait()
 	}
 	if len(t.keys) == 0 || !t.active {
+		if t.left && t.stop != nil {
+			go t.stop()
+		}
 		return 0, io.EOF
 	}
 	n := copy(p, t.keys)
@@ -139,13 +333,18 @@ func (t *Terminal) Write(p []byte) (int, error) {
 	if out == nil {
 		return len(p), nil
 	}
-	if tty {
-		return out.Write(p)
+	if !tty {
+		if _, err := out.Write(crlf(p)); err != nil {
+			t.fail(err)
+			return 0, err
+		}
+		return len(p), nil
 	}
-	if _, err := out.Write(crlf(p)); err != nil {
-		return 0, err
+	n, err := out.Write(p)
+	if err != nil {
+		t.fail(err)
 	}
-	return len(p), nil
+	return n, err
 }
 
 func crlf(p []byte) []byte {

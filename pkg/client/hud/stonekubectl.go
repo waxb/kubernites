@@ -93,7 +93,7 @@ func (r *stoneRun) answer(yes bool) {
 }
 
 func (r *stoneRun) yes(in Input) bool {
-	return r.ask != nil && r.ask.Confirm && r.askFrames >= AskSeenFrames && in.Pressed(ebiten.KeyY) && !in.Control
+	return r.ask != nil && r.ask.Confirm && r.askFrames >= AskSeenFrames && in.PressedLetter('y') && !in.Control
 }
 
 func (h *HUD) SetStoneMode(mode string) {
@@ -105,15 +105,39 @@ func (h *HUD) StoneMode() string {
 }
 
 func (h *HUD) StoneKubectl() bool {
-	return h.stoneMode == StoneModeKube || h.stoneMode == "" && ui.Naming()
+	return StoneKubectlWith(h.stoneMode, ui.Naming())
+}
+
+func StoneKubectlWith(mode string, trueNames bool) bool {
+	return mode == StoneModeKube || mode == "" && trueNames
 }
 
 func (h *HUD) StartStoneJob(job StoneJob) {
-	h.kube = &stoneRun{job: job}
+	h.kube, h.stoneHeld = &stoneRun{job: job}, false
 }
 
 func (h *HUD) PressLiveEdit(rest string) []Intent {
 	return h.pressLiveEdit(rest)
+}
+
+func (h *HUD) EndStoneJobs() bool {
+	running := false
+	for _, r := range []*stoneRun{h.kube, h.fetching} {
+		if r != nil {
+			r.job.Stop()
+			running = true
+		}
+	}
+	if h.liveEdit != nil && h.liveEdit.run != nil {
+		h.liveEdit.run.job.Stop()
+		running = true
+	}
+	if running {
+		h.pumpStone()
+		h.pumpEdit()
+		h.pumpFetch()
+	}
+	return h.kube != nil || h.fetching != nil || h.liveEdit != nil && h.liveEdit.run != nil
 }
 
 func (h *HUD) StoneRunning() bool {
@@ -128,8 +152,12 @@ func (h *HUD) StoneAsking() (StoneAsk, bool) {
 }
 
 func (h *HUD) stoneLabel() [3]string {
+	return stoneMenuRow(h.StoneKubectl())
+}
+
+func stoneMenuRow(kubectl bool) [3]string {
 	label := "STONE: STORY"
-	if h.StoneKubectl() {
+	if kubectl {
 		label = stoneOnLabelK8s()
 	}
 	return [3]string{StoneMenuID, ui.Settle(label), ui.Bridge("The Speaking Stone keeps Kubernites' own read words, or speaks the realm's true tongue word for word", "The Speaking Stone keeps Kubernites' read verbs (STORY), or runs kubectl itself on this cluster (KUBECTL)")}
@@ -154,7 +182,7 @@ func (h *HUD) startKubectl(cmd string) bool {
 	if !ok {
 		return false
 	}
-	h.kube = &stoneRun{job: job}
+	h.kube, h.stoneHeld = &stoneRun{job: job}, false
 	return true
 }
 
@@ -178,10 +206,16 @@ func (h *HUD) pumpStone() []Intent {
 	}
 	h.kube = nil
 	end := r.job.End()
+	held := false
 	for _, sess := range end.Sessions {
 		if line, ok := SessionEndLine(sess); ok {
 			h.Stone.Append(LineHint, line)
 		}
+		held = held || sess.Opened && sess.TTY
+	}
+	if held {
+		h.stoneHeld = true
+		h.Stone.Append(LineHint, SessionHeldLine)
 	}
 	sound := "click"
 	switch {
@@ -334,7 +368,7 @@ func (h *HUD) kubectlKeys(in Input) []Intent {
 		switch {
 		case k == ebiten.KeyEscape && r.ask != nil:
 			r.answer(false)
-		case k == ebiten.KeyEscape, k == ebiten.KeyC && in.Ctrl:
+		case k == ebiten.KeyEscape, in.Ctrl && in.chordIs(k, 'c'):
 			r.job.Stop()
 		}
 	}

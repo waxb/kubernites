@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -130,7 +131,8 @@ func overlapping(w *World) []string {
 func structuresFor(w *World, kind, ns, name string) []view.Structure {
 	var out []view.Structure
 	for _, st := range w.Site.Structures {
-		if st.Object.Kind == kind && st.Object.Namespace == ns && st.Object.Name == name {
+		hall := st.Object.Name == "" && strings.HasSuffix(st.Object.Resource, "."+name)
+		if st.Object.Kind == kind && st.Object.Namespace == ns && (st.Object.Name == name || hall) {
 			out = append(out, st)
 		}
 	}

@@ -81,10 +81,25 @@ type Input struct {
 	Ctrl        bool
 	Control     bool
 	Alt         bool
+	Layout      func(ebiten.Key) string
 }
 
 func (in Input) Pressed(k ebiten.Key) bool {
 	return slices.Contains(in.Keys, k)
+}
+
+func (in Input) chordIs(k ebiten.Key, letter rune) bool {
+	r, ok := in.ChordRune(k)
+	return ok && r == letter
+}
+
+func (in Input) PressedLetter(letter rune) bool {
+	for _, k := range in.Keys {
+		if r, ok := in.ChordRune(k); ok && r == letter {
+			return true
+		}
+	}
+	return false
 }
 
 type Selection struct {

@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"image/color"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/hajimehoshi/ebiten/v2"
 
@@ -44,6 +46,8 @@ const (
 type screened interface {
 	Screen() StoneScreen
 }
+
+const SessionHeldLine = "The session ended: keys typed now are dropped. Enter returns to the Stone's prompt."
 
 func (r *stoneRun) screen() StoneScreen {
 	if r == nil {
@@ -92,6 +96,48 @@ var controlRunes = map[ebiten.Key]rune{
 	ebiten.KeyDigit6: '^', ebiten.KeyMinus: '_',
 }
 
+var labelledControl = map[rune]rune{' ': ' ', '[': '[', '\\': '\\', ']': ']', '^': '^', '_': '_', '6': '^', '-': '_'}
+
+var layoutKeys = []ebiten.Key{
+	ebiten.KeyA, ebiten.KeyB, ebiten.KeyC, ebiten.KeyD, ebiten.KeyE, ebiten.KeyF, ebiten.KeyG, ebiten.KeyH, ebiten.KeyI,
+	ebiten.KeyJ, ebiten.KeyK, ebiten.KeyL, ebiten.KeyM, ebiten.KeyN, ebiten.KeyO, ebiten.KeyP, ebiten.KeyQ, ebiten.KeyR,
+	ebiten.KeyS, ebiten.KeyT, ebiten.KeyU, ebiten.KeyV, ebiten.KeyW, ebiten.KeyX, ebiten.KeyY, ebiten.KeyZ,
+	ebiten.KeyDigit0, ebiten.KeyDigit1, ebiten.KeyDigit2, ebiten.KeyDigit3, ebiten.KeyDigit4, ebiten.KeyDigit5,
+	ebiten.KeyDigit6, ebiten.KeyDigit7, ebiten.KeyDigit8, ebiten.KeyDigit9, ebiten.KeyMinus, ebiten.KeyEqual,
+	ebiten.KeyBracketLeft, ebiten.KeyBracketRight, ebiten.KeyBackslash, ebiten.KeySemicolon, ebiten.KeyQuote,
+	ebiten.KeyComma, ebiten.KeyPeriod, ebiten.KeySlash, ebiten.KeyBackquote, ebiten.KeyIntlBackslash,
+}
+
+func (in Input) labelled(letter rune) bool {
+	for _, k := range layoutKeys {
+		if label := []rune(in.Layout(k)); len(label) == 1 && unicode.ToLower(label[0]) == letter {
+			return true
+		}
+	}
+	return false
+}
+
+func (in Input) ChordRune(k ebiten.Key) (rune, bool) {
+	if in.Layout != nil {
+		if label := []rune(in.Layout(k)); len(label) == 1 && label[0] < utf8.RuneSelf {
+			r := unicode.ToLower(label[0])
+			if r >= 'a' && r <= 'z' {
+				return r, true
+			}
+			if us := rune('a' + int(k-ebiten.KeyA)); k >= ebiten.KeyA && k <= ebiten.KeyZ && !in.labelled(us) {
+				return us, true
+			}
+			c, ok := labelledControl[r]
+			return c, ok
+		}
+	}
+	if k >= ebiten.KeyA && k <= ebiten.KeyZ {
+		return rune('a' + int(k-ebiten.KeyA)), true
+	}
+	r, ok := controlRunes[k]
+	return r, ok
+}
+
 func TerminalKeys(in Input) ([]termview.Key, string) {
 	meta := in.Ctrl && !in.Control
 	if meta {
@@ -106,11 +152,7 @@ func TerminalKeys(in Input) ([]termview.Key, string) {
 		if !in.Control {
 			continue
 		}
-		if k >= ebiten.KeyA && k <= ebiten.KeyZ {
-			keys = append(keys, termview.Key{Rune: rune('a' + int(k-ebiten.KeyA)), Ctrl: true, Alt: in.Alt})
-			continue
-		}
-		if r, ok := controlRunes[k]; ok {
+		if r, ok := in.ChordRune(k); ok {
 			keys = append(keys, termview.Key{Rune: r, Ctrl: true, Alt: in.Alt})
 		}
 	}
@@ -139,6 +181,14 @@ func (h *HUD) terminalKeys(sc StoneScreen, in Input) []Intent {
 }
 
 var terminalInk = color.RGBA{6, 9, 11, 255}
+
+func firstGlyph(text string) string {
+	r, size := utf8.DecodeRuneInString(text)
+	if size == 0 || r == utf8.RuneError && size <= 1 {
+		return " "
+	}
+	return text[:size]
+}
 
 func (h *HUD) drawTerminal(dst *ebiten.Image, sc StoneScreen) {
 	out := h.stoneOutput()
@@ -181,7 +231,7 @@ func (h *HUD) drawTerminal(dst *ebiten.Image, sc StoneScreen) {
 				flush()
 				runX, runClr = x, fg
 			}
-			run += c.Text
+			run += firstGlyph(c.Text)
 		}
 		flush()
 	}

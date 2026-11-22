@@ -50,10 +50,22 @@ func PipsShown(sc Scene) bool {
 	return api && len(sc.Metrics.Nodes) > 0
 }
 
-func (r *Renderer) DrawKeepPips(dst *ebiten.Image, cam render.Camera, sc Scene) {
+type keepPips struct {
+	pips             []Pip
+	cx, bottom, size int
+}
+
+func (k keepPips) plaque() ui.Rect {
+	rows := (len(k.pips) + pipRow - 1) / pipRow
+	wide := min(len(k.pips), pipRow)*(k.size+pipGap) - pipGap
+	return ui.Rect{X: k.cx - wide/2 - pipPad, Y: k.bottom - rows*(k.size+pipGap) - pipPad, W: wide + 2*pipPad, H: rows*(k.size+pipGap) - pipGap + 2*pipPad}
+}
+
+func (r *Renderer) keepPips(cam render.Camera, sc Scene) []keepPips {
 	if !PipsShown(sc) {
-		return
+		return nil
 	}
+	var out []keepPips
 	for _, it := range r.placeStructures(cam, sc) {
 		if it.S.Kind != view.StructKeep || it.S.State != view.StateReady {
 			continue
@@ -70,14 +82,21 @@ func (r *Renderer) DrawKeepPips(dst *ebiten.Image, cam render.Camera, sc Scene) 
 		if head, ok := r.Lib.Headroom(it.names[0]); ok {
 			top = it.sy - float64(head)*cam.Scale()
 		}
-		drawPips(dst, pips, int(it.sx), int(top)-pipLift, PipSize(cam.Scale()))
+		out = append(out, keepPips{pips: pips, cx: int(it.sx), bottom: int(top) - pipLift, size: PipSize(cam.Scale())})
+	}
+	return out
+}
+
+func (r *Renderer) DrawKeepPips(dst *ebiten.Image, cam render.Camera, sc Scene) {
+	for _, k := range r.keepPips(cam, sc) {
+		drawPips(dst, k)
 	}
 }
 
-func drawPips(dst *ebiten.Image, pips []Pip, cx, bottom, size int) {
+func drawPips(dst *ebiten.Image, k keepPips) {
+	pips, cx, bottom, size := k.pips, k.cx, k.bottom, k.size
 	rows := (len(pips) + pipRow - 1) / pipRow
-	wide := min(len(pips), pipRow)*(size+pipGap) - pipGap
-	plaque := ui.Rect{X: cx - wide/2 - pipPad, Y: bottom - rows*(size+pipGap) - pipPad, W: wide + 2*pipPad, H: rows*(size+pipGap) - pipGap + 2*pipPad}
+	plaque := k.plaque()
 	ui.Fill(dst, plaque.Offset(1, 1), ui.Palette.Shadow)
 	ui.Fill(dst, plaque, ui.Tint(ui.Palette.ConsoleEdge, 220))
 	ui.Stroke(dst, plaque, ui.Palette.Gold)

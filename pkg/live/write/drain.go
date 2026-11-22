@@ -81,6 +81,8 @@ func controllerOf(p *corev1.Pod) string {
 
 type DrainReport struct {
 	Hut     string
+	Cordon  string
+	Code    int
 	Done    bool
 	Gone    bool
 	Blocked string
@@ -97,24 +99,29 @@ func blockingText(a Answer) string {
 
 func (g *Gate) IssueDrain(d Drain) {
 	if d.Cordon != nil {
-		g.Issue(d.Cordon.Request)
+		g.Issue(d.Cordon.request())
 	}
 	for _, o := range d.Evict {
-		g.issue(o.Request, DrainTries)
+		g.issue(o.request(), DrainTries)
 	}
 }
 
 func (g *Gate) RunDrain(ctx context.Context, d Drain, every time.Duration, report func(DrainReport)) error {
 	defer func() {
 		if d.Cordon != nil {
-			g.Revoke(Ticket(d.Cordon.Request.Key()))
+			g.Revoke(d.Cordon.Ticket())
 		}
 		for _, o := range d.Evict {
-			g.Revoke(Ticket(o.Request.Key()))
+			g.Revoke(o.Ticket())
 		}
 	}()
 	if d.Cordon != nil {
 		ans := g.Send(ctx, *d.Cordon)
+		r := DrainReport{Cordon: d.Node, Code: ans.Code, Tries: 1, Done: ans.OK()}
+		if !ans.OK() {
+			r.Failed = ans.Text()
+		}
+		report(r)
 		if !ans.OK() {
 			return fmt.Errorf("cordon %s: %s", d.Node, ans.Text())
 		}
@@ -143,7 +150,7 @@ func (g *Gate) RunDrain(ctx context.Context, d Drain, every time.Duration, repor
 			}
 			report(r)
 			if r.Blocked == "" {
-				g.Revoke(Ticket(o.Request.Key()))
+				g.Revoke(o.Ticket())
 				break
 			}
 			select {

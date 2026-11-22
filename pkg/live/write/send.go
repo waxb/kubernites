@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 )
@@ -40,9 +41,9 @@ func (a Answer) Blocked() bool {
 func (a Answer) Text() string {
 	switch {
 	case a.Err != nil:
-		return a.Err.Error()
+		return Redact(a.Err.Error())
 	case a.Message != "":
-		return a.Message
+		return Redact(a.Message)
 	case a.Reason != "":
 		return fmt.Sprintf("%d %s", a.Code, a.Reason)
 	}
@@ -148,7 +149,7 @@ func (o Order) dryRun() Request {
 	r.Query = q
 	if r.Method == http.MethodDelete && len(r.Body) > 0 {
 		var opts map[string]any
-		if json.Unmarshal(r.Body, &opts) == nil {
+		if json.Unmarshal(r.Body, &opts) == nil && opts != nil {
 			opts["dryRun"] = []string{"All"}
 			r.Body = mustJSON(opts)
 		}
@@ -156,10 +157,33 @@ func (o Order) dryRun() Request {
 	return r
 }
 
+const NotAnObject = "the request's body is not a JSON object, so it has no preview and nothing was sent"
+
+var objectBodies = []string{"application/json", "application/merge-patch+json", "application/strategic-merge-patch+json"}
+
+func objectBody(r Request) bool {
+	body := bytes.TrimSpace(r.Body)
+	if len(body) == 0 {
+		return true
+	}
+	kind, _, _ := strings.Cut(r.ContentType, ";")
+	if r.Method != http.MethodDelete && !slices.Contains(objectBodies, strings.ToLower(strings.TrimSpace(kind))) {
+		return true
+	}
+	var doc map[string]json.RawMessage
+	return body[0] == '{' && json.Unmarshal(body, &doc) == nil && doc != nil
+}
+
 func (g *Gate) Preview(ctx context.Context, o Order) (Answer, []Field) {
-	ans := g.do(ctx, o.dryRun(), o.ContentType)
 	fields := make([]Field, len(o.Fields))
 	copy(fields, o.Fields)
+	if IgnoresDryRun(o.request()) {
+		return Answer{Code: http.StatusBadRequest, Message: MintsOnDryRun, NoDryRun: true}, fields
+	}
+	if !objectBody(o.request()) {
+		return Answer{Code: http.StatusBadRequest, Message: NotAnObject}, fields
+	}
+	ans := g.do(ctx, o.dryRun(), o.ContentType)
 	if !ans.OK() {
 		return ans, fields
 	}
@@ -173,7 +197,26 @@ func (g *Gate) Preview(ctx context.Context, o Order) (Answer, []Field) {
 }
 
 func (g *Gate) Send(ctx context.Context, o Order) Answer {
-	return g.do(ctx, o.Request, o.ContentType)
+	r := o.request()
+	return g.do(ctx, r, r.ContentType)
+}
+
+func (o Order) request() Request {
+	r := o.Request
+	if r.ContentType == "" {
+		r.ContentType = o.ContentType
+	}
+	return r
+}
+
+func (o Order) Ticket() Ticket {
+	return Ticket(o.request().Key())
+}
+
+func (g *Gate) SendConfirmed(ctx context.Context, o Order) Answer {
+	ticket := g.Issue(o.request())
+	defer g.Revoke(ticket)
+	return g.Send(ctx, o)
 }
 
 func Lookup(obj any, path []string) string {

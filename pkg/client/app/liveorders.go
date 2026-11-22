@@ -50,6 +50,7 @@ type orderSpec struct {
 	stone    string
 	stoneRun bool
 	read     bool
+	askFirst bool
 }
 
 func patchAccess(gvr write.GVR, ns, name, sub string) write.Access {
@@ -493,12 +494,20 @@ func (s *Session) keepSpecs(n *corev1.Node) []orderSpec {
 			}
 			return write.PlanDrain(n, list)
 		}}
-	if w := s.Writer; w != nil && w.drain != nil && w.drain.node == n.Name && !w.drain.over {
-		drain.label, drain.running = "DRAINING", true
-		drain.tip = ui.Bridge("The drain runs: open it to see what waits, or STOP it.", "The drain runs: open it to see what blocks it, or STOP it.")
+	if w := s.Writer; w != nil && w.drain != nil && !w.drain.over {
+		if w.drain.node == n.Name {
+			drain.label, drain.running = "DRAINING", true
+			drain.tip = ui.Bridge("The drain runs: open it to see what waits, or STOP it.", "The drain runs: open it to see what blocks it, or STOP it.")
+		} else {
+			drain.off, drain.offWhy = oneDrain(w.drain.node), "DRAINING "+w.drain.node
+		}
 	}
 	del := deleteSpec(write.Nodes, "Node", n, 6, ui.Bridge("Remove the Keep from the realm: destroying more than one thing.", "Delete the Node object: destroying more than one thing."))
 	return []orderSpec{cordon, drain, del}
+}
+
+func oneDrain(node string) string {
+	return ui.Bridge("One drain at a time: Keep "+node+" is draining. STOP it, or wait until it ends.", "One drain at a time: node "+node+" is draining. STOP it, or wait until it ends.")
 }
 
 var objectGVRs = map[string]write.GVR{
@@ -595,13 +604,16 @@ func (s *Session) orderForm(run *orderRun) hud.OrderForm {
 				form.Progress = append(form.Progress, dr.budget)
 			}
 			for _, f := range dr.failed {
-				form.Progress = append(form.Progress, "FAILED: "+f)
+				form.Progress = append(form.Progress, f.shown())
 			}
 			form.Stop = !dr.over
 			if dr.over {
 				form.Note, form.Bad = "DONE", len(dr.failed) > 0 || dr.err != ""
-				if dr.err != "" {
+				switch {
+				case strings.HasPrefix(dr.err, "STOPPED"):
 					form.Note = dr.err
+				case dr.err != "":
+					form.Note = clusterSaid("", dr.err)
 				}
 			}
 		}
@@ -622,6 +634,8 @@ func classTitle(c write.Class) string {
 		return "Destroying more than one thing"
 	case write.Unpreviewed:
 		return ui.Bridge("No preview", "No dry run")
+	case write.Tokens:
+		return ui.Bridge("Making a writ's token", "Minting a token")
 	}
 	return string(c)
 }
@@ -635,11 +649,13 @@ func classText(c write.Class) []string {
 		return []string{ui.Bridge("This order reaches into a hut: a shell, attach, port-forward, copy, debug or proxy works inside the workload with these credentials.",
 			"This reaches into a workload: exec, attach, port-forward, cp, debug or proxy run inside it with these credentials.")}
 	case write.Destroy:
-		return []string{ui.Bridge("This order destroys more than one thing: a fief, a Keep, a volume, a rule of who may do what, a whole kind, everything a selector names, several things named at once, or a removal without grace.",
-			"This destroys more than one thing: a namespace, Node, PersistentVolume, CRD, RBAC object or admission webhook, a collection or selector delete, a delete of several names or kinds, --all, apply --prune, or a force deletion (grace period 0).")}
+		return []string{ui.Bridge("This order destroys more than one thing: a fief, a Keep, a volume, a rule of who may do what, a whole kind, everything a selector names, several things named at once or written in decrees, a Keep drained by force, or a removal without grace.",
+			"This destroys more than one thing: a namespace, Node, PersistentVolume, CRD, RBAC object or admission webhook, a collection or selector delete, a delete of several names, kinds or objects in files, --all, replace or apply --force of several objects, apply --prune, a drain with --disable-eviction or --force, or a force deletion (grace period 0).")}
 	case write.Unpreviewed:
 		return []string{ui.Bridge("A guard of the Chancery has side effects, so it refuses a preview. The order can go without one: what changes is seen only after it is sent.",
 			"An admission webhook with sideEffects refused the dry run. The request can be sent without a preview: what changes is seen only after it is sent.")}
+	case write.Tokens:
+		return []string{tokenWarning(write.Writes)}
 	}
 	return nil
 }

@@ -17,10 +17,11 @@ import (
 const maxBody = 16 << 20
 
 type Request struct {
-	Method string
-	Path   string
-	Query  url.Values
-	Body   []byte
+	Method      string
+	Path        string
+	Query       url.Values
+	Body        []byte
+	ContentType string
 }
 
 func (r Request) Key() string {
@@ -30,7 +31,7 @@ func (r Request) Key() string {
 			q[k] = v
 		}
 	}
-	sum := sha256.Sum256([]byte(r.Method + "\x00" + r.Path + "\x00" + q.Encode() + "\x00" + string(r.Body)))
+	sum := sha256.Sum256([]byte(r.Method + "\x00" + r.Path + "\x00" + q.Encode() + "\x00" + r.ContentType + "\x00" + string(r.Body)))
 	return hex.EncodeToString(sum[:])
 }
 
@@ -239,6 +240,18 @@ func ClassesOf(r Request) []Class {
 	return classesOf(r, parse(r.Path), false)
 }
 
+const MintsOnDryRun = "a ServiceAccount token request is carried out by the API server even when it is sent as a dry run: it mints a real token, valid until it expires, so it has no preview"
+
+func (t target) mintsOnDryRun(r Request) bool {
+	return r.Method == http.MethodPost && t.api && t.group == "" && t.resource == "serviceaccounts" && t.name != "" && t.sub() == "token"
+}
+
+const TokenDryRun = "a ServiceAccount token request sent as a dry run would still mint a real token, so Kubernites never sends one"
+
+func IgnoresDryRun(r Request) bool {
+	return parse(r.Path).mintsOnDryRun(r)
+}
+
 func classesOf(r Request, t target, upgrade bool) []Class {
 	var out []Class
 	add := func(c Class) {
@@ -257,6 +270,9 @@ func classesOf(r Request, t target, upgrade bool) []Class {
 	}
 	if destroys(r, t) {
 		add(Destroy)
+	}
+	if t.mintsOnDryRun(r) {
+		add(Tokens)
 	}
 	slices.Sort(out)
 	return out
