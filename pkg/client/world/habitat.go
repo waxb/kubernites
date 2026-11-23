@@ -1,7 +1,6 @@
 package world
 
 import (
-	"hash/fnv"
 	"math"
 
 	"github.com/waxb/kubernites/pkg/client/art"
@@ -36,21 +35,39 @@ type habitat struct {
 	shy     []bool
 }
 
+const (
+	fnvOffset64 fnv64 = 14695981039346656037
+	fnvPrime64  fnv64 = 1099511628211
+)
+
+type fnv64 uint64
+
+func (h fnv64) str(s string) fnv64 {
+	for i := 0; i < len(s); i++ {
+		h = (h ^ fnv64(s[i])) * fnvPrime64
+	}
+	return h
+}
+
+func (h fnv64) bytes(b ...byte) fnv64 {
+	for _, c := range b {
+		h = (h ^ fnv64(c)) * fnvPrime64
+	}
+	return h
+}
+
 func StructureSig(site view.Site) uint64 {
-	h := fnv.New64a()
+	h := fnvOffset64
 	for _, s := range site.Structures {
-		h.Write([]byte(s.Kind))
-		h.Write([]byte{byte(s.X), byte(s.X >> 8), byte(s.Y), byte(s.Y >> 8), byte(s.W), byte(s.H), byte(s.Plot), byte(s.Territory)})
+		h = h.str(s.Kind).bytes(byte(s.X), byte(s.X>>8), byte(s.Y), byte(s.Y>>8), byte(s.W), byte(s.H), byte(s.Plot), byte(s.Territory))
 	}
 	for _, hv := range site.Havens {
-		h.Write([]byte(hv.ID))
-		h.Write([]byte{byte(hv.Quay.X), byte(hv.Quay.Y), byte(hv.Tier), byte(hv.Pier), boolByte(hv.Open)})
+		h = h.str(hv.ID).bytes(byte(hv.Quay.X), byte(hv.Quay.Y), byte(hv.Tier), byte(hv.Pier), boolByte(hv.Open))
 	}
 	for _, is := range site.Islands {
-		h.Write([]byte(is.ID))
-		h.Write([]byte{boolByte(is.Owned)})
+		h = h.str(is.ID).bytes(boolByte(is.Owned))
 	}
-	return h.Sum64()
+	return uint64(h)
 }
 
 func boolByte(v bool) byte {

@@ -290,7 +290,7 @@ func (d *Driver) Target(id string, f hud.Frame, hover bool) (int, int, error) {
 				return 0, 0, fmt.Errorf("%s is shown but cannot be pressed now", id)
 			}
 			x, y, covered := visiblePoint(all, b)
-			if covered != "" && !(covered == hud.KMapCardID && strings.HasPrefix(id, "grim:")) {
+			if covered != "" {
 				return 0, 0, fmt.Errorf("%s is under %s: close or move that first", id, covered)
 			}
 			return x, y, nil

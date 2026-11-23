@@ -1,6 +1,8 @@
 package world
 
 import (
+	"slices"
+
 	"github.com/hajimehoshi/ebiten/v2"
 
 	"github.com/waxb/kubernites/pkg/client/model"
@@ -33,6 +35,7 @@ type life struct {
 	fanAt  float64
 	fanFor *model.PodView
 	people census
+	on     plannedSite
 }
 
 func (r *Renderer) lifeOf() *life {
@@ -61,7 +64,7 @@ func (r *Renderer) syncLife(sc Scene) *life {
 	if r.Land != nil {
 		version = r.Land.version
 	}
-	if sig := lifeSig(sc.Site, version); sig != l.sig || l.road == nil {
+	if sig := lifeSig(sc.Site, version); sig != l.sig || l.road == nil && !l.on.same(sc.Site) {
 		l.sig = sig
 		l.plan(sc.Site)
 	}
@@ -76,6 +79,43 @@ func (l *life) plan(site view.Site) {
 	l.stalls = StallSpots(site, maxStalls)
 	l.road = CartRoute(site, g)
 	l.boats = PlanBoats(site)
+	l.on.keep(site)
+}
+
+type plannedSite struct {
+	site  view.Site
+	forum view.Forum
+	ok    bool
+}
+
+func (p *plannedSite) keep(s view.Site) {
+	k := &p.site
+	k.Gate, k.Plaza, k.TowerSpot, k.Width, k.Height, k.NoHarbor = s.Gate, s.Plaza, s.TowerSpot, s.Width, s.Height, s.NoHarbor
+	k.Tiles = append(k.Tiles[:0], s.Tiles...)
+	k.Elevation = append(k.Elevation[:0], s.Elevation...)
+	k.Structures = append(k.Structures[:0], s.Structures...)
+	k.Islands = append(k.Islands[:0], s.Islands...)
+	k.Region = append(k.Region[:0], s.Region...)
+	k.Power = append(k.Power[:0], s.Power...)
+	k.Wear = append(k.Wear[:0], s.Wear...)
+	k.Havens = append(k.Havens[:0], s.Havens...)
+	k.Spots = append(k.Spots[:0], s.Spots...)
+	k.Plots = append(k.Plots[:0], s.Plots...)
+	k.Forum = nil
+	if s.Forum != nil {
+		p.forum = *s.Forum
+		k.Forum = &p.forum
+	}
+	p.ok = true
+}
+
+func (p *plannedSite) same(s view.Site) bool {
+	k := &p.site
+	return p.ok && k.Gate == s.Gate && k.Plaza == s.Plaza && k.TowerSpot == s.TowerSpot && k.Width == s.Width && k.Height == s.Height && k.NoHarbor == s.NoHarbor &&
+		(k.Forum == nil) == (s.Forum == nil) && (s.Forum == nil || *k.Forum == *s.Forum) &&
+		slices.Equal(k.Tiles, s.Tiles) && slices.Equal(k.Elevation, s.Elevation) && slices.Equal(k.Structures, s.Structures) &&
+		slices.Equal(k.Islands, s.Islands) && slices.Equal(k.Region, s.Region) && slices.Equal(k.Power, s.Power) && slices.Equal(k.Wear, s.Wear) &&
+		slices.Equal(k.Havens, s.Havens) && slices.Equal(k.Spots, s.Spots) && slices.Equal(k.Plots, s.Plots)
 }
 
 func (r *Renderer) lifeItems(cam render.Camera, sc Scene) []Drawable {

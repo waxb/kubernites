@@ -69,7 +69,11 @@ func CouncilBody() ui.Rect {
 }
 
 func CouncilTabID(i int) ui.Rect {
-	w := (Overlay.W - 20 - (len(Advisors)-1)*tabGap) / len(Advisors)
+	return councilTabAt(i, len(Advisors))
+}
+
+func councilTabAt(i, n int) ui.Rect {
+	w := (Overlay.W - 20 - (n-1)*tabGap) / n
 	return ui.Rect{X: Overlay.X + 10 + i*(w+tabGap), Y: Overlay.Y + 84, W: w, H: tabH}
 }
 
@@ -85,6 +89,16 @@ func (h *HUD) CouncilTab() string {
 	return h.CouncilTabID
 }
 
+func (h *HUD) councilTabOf(f Frame) string {
+	tab := h.CouncilTab()
+	for _, a := range councilAdvisors(f) {
+		if a.Id == tab {
+			return tab
+		}
+	}
+	return TabQuartermaster
+}
+
 func (h *HUD) OpenCouncil(tab string) {
 	h.OverlayID = OverlayCouncil
 	if tab != "" {
@@ -93,6 +107,9 @@ func (h *HUD) OpenCouncil(tab string) {
 }
 
 func CouncilPageFor(tab string, f Frame) CouncilPage {
+	if f.Live {
+		return liveCouncilPage(tab, f)
+	}
 	switch tab {
 	case TabStewards:
 		return StewardsPage(f)
@@ -129,9 +146,17 @@ func SectionRows(p CouncilPage, top int) [][]int {
 func (h *HUD) CouncilButtons(f Frame) []Button {
 	out := append([]Button{closeButton(Overlay)}, dialButtons(f)...)
 	out = append(out, counselButtons(f)...)
-	active := h.CouncilTab()
-	for i, a := range Advisors {
-		out = append(out, Button{ID: CouncilPrefix + ":tab:" + a.Id, Rect: CouncilTabID(i), Label: a.title(), Tip: a.tip, Selected: active == a.Id})
+	active := h.councilTabOf(f)
+	advisors := councilAdvisors(f)
+	for i, a := range advisors {
+		tip := a.tip
+		if f.Live {
+			tip = liveAdvisorTip(a.Id)
+		}
+		out = append(out, Button{ID: CouncilPrefix + ":tab:" + a.Id, Rect: councilTabAt(i, len(advisors)), Label: a.title(), Tip: tip, Selected: active == a.Id})
+	}
+	if f.Live {
+		return out
 	}
 	switch active {
 	case TabQuartermaster:
@@ -230,6 +255,9 @@ func (h *HUD) pressCouncil(rest string, f Frame) []Intent {
 const counselBtnW = 120
 
 func counselButtons(f Frame) []Button {
+	if f.Live {
+		return nil
+	}
 	box := CounselBox()
 	rect := ui.Rect{X: box.X + box.W - counselBtnW, Y: box.Y + (counselLines-1)*ui.LineHeight + 2, W: counselBtnW, H: 14}
 	if fix := EconomyOf(f.State).Fix; fix != nil && FixFade(f, *fix) != view.FixNames {
@@ -255,6 +283,9 @@ func councilWellButton(f Frame) (Button, bool) {
 	if !CouncilOpen(f) {
 		return Button{}, false
 	}
-	w := 60
-	return Button{ID: "cmd:council", Rect: ui.Rect{X: InfoWell.X + InfoWell.W - 5 - w, Y: InfoWell.Y + 4, W: w, H: 14}, Label: councilLabel, Tip: councilTip}, true
+	w, tip := 60, councilTip
+	if f.Live {
+		tip = liveCouncilTip
+	}
+	return Button{ID: "cmd:council", Rect: ui.Rect{X: InfoWell.X + InfoWell.W - 5 - w, Y: InfoWell.Y + 4, W: w, H: 14}, Label: councilLabel, Tip: tip}, true
 }

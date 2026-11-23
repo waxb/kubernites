@@ -60,6 +60,9 @@ func (f Frame) RawFrame() Frame {
 }
 
 func (h *HUD) Stage(f Frame) Frame {
+	if h.live != nil {
+		f.Live, f.LiveCouncil = true, h.live.Council
+	}
 	raw := h.withUnreadTrouble(f.RawFrame())
 	if !h.Director.Stage.Primed {
 		return h.withBoard(raw)

@@ -415,6 +415,9 @@ func (s *Session) liveCard(r liveView) hud.LiveCard {
 	card.Quiet = quietTrouble(s.State.Calamities)
 	card.Listed = listedReads(r)
 	card.Forwards = s.liveForwards()
+	if c, ok := r.(councilSource); ok {
+		card.Council = c.Council()
+	}
 	if f, ok := r.(freshness); ok {
 		fresh := f.Freshness()
 		card.Watching = fresh.Watching
@@ -427,6 +430,10 @@ func (s *Session) liveCard(r liveView) hud.LiveCard {
 
 type freshness interface {
 	Freshness() live.Freshness
+}
+
+type councilSource interface {
+	Council() view.LiveCouncil
 }
 
 func quietTrouble(list []view.CalamityView) []hud.QuietTrouble {

@@ -61,7 +61,6 @@ const (
 	restartsLesson = "chronicles"
 	classLesson    = "soulvault"
 	laborLesson    = "hands"
-	loreLesson     = "lore"
 )
 
 func taughtLines(c Card, f Frame) Card {

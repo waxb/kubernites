@@ -42,6 +42,9 @@ func KindLines(s view.Structure, f Frame) []Line {
 	case view.StructGuildhall:
 		return withServiceType(s, append(DepotLines(s, f), GuildhallLines(s, f)...))
 	case view.StructKeep:
+		if f.Live {
+			return LiveKeepLines(s, f)
+		}
 		return taughtLines(Card{Lines: append(KeepSupplyLines(s, f), KeepLines(s)...)}, f).Lines
 	case view.StructVault:
 		return VaultLines(s, f)

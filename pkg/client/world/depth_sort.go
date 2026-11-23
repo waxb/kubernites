@@ -2,28 +2,41 @@ package world
 
 import "slices"
 
-func sortByDepth(items []Drawable) {
-	copy(items, depthOrder(items, func(d Drawable) float64 { return d.Depth }))
+type depthSort struct {
+	keys   []float64
+	order  []int
+	items  []Drawable
+	blocks []liftBlock
+	lifted []liftBlock
 }
 
-func depthOrder[T any](items []T, depth func(T) float64) []T {
-	order := make([]int, len(items))
-	for i := range order {
-		order[i] = i
+func sortByDepth(items []Drawable) {
+	new(depthSort).sort(items)
+}
+
+func (s *depthSort) orderBy(n int, key func(i int) float64) []int {
+	s.keys, s.order = s.keys[:0], s.order[:0]
+	for i := range n {
+		s.keys = append(s.keys, key(i))
+		s.order = append(s.order, i)
 	}
-	slices.SortFunc(order, func(a, b int) int {
-		da, db := depth(items[a]), depth(items[b])
+	keys := s.keys
+	slices.SortFunc(s.order, func(a, b int) int {
 		switch {
-		case da < db:
+		case keys[a] < keys[b]:
 			return -1
-		case db < da:
+		case keys[b] < keys[a]:
 			return 1
 		}
 		return a - b
 	})
-	out := make([]T, len(items))
-	for i, k := range order {
-		out[i] = items[k]
+	return s.order
+}
+
+func (s *depthSort) sort(items []Drawable) {
+	s.items = s.items[:0]
+	for _, k := range s.orderBy(len(items), func(i int) float64 { return items[i].Depth }) {
+		s.items = append(s.items, items[k])
 	}
-	return out
+	copy(items, s.items)
 }

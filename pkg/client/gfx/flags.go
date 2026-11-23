@@ -35,6 +35,15 @@ func clothImage(m art.FlagMark, frame int) *ebiten.Image {
 	return actual.(*ebiten.Image)
 }
 
+func HasFlagCloth(m art.FlagMark, frame int) bool {
+	_, ok := cloths.Load(clothKey{light: m.Light, dark: m.Dark, frame: frame % art.FlagFrames})
+	return ok
+}
+
+func MakeFlagCloth(m art.FlagMark, frame int) {
+	clothImage(m, frame)
+}
+
 func DrawFlag(dst *ebiten.Image, m art.FlagMark, frame int, sx, sy, zoom float64, o render.SpriteOptions) {
 	r := render.Region{W: art.FlagClothW, H: art.FlagClothH, AnchorX: -m.X, AnchorY: -m.Y}
 	render.DrawAt(dst, clothImage(m, frame), r, sx, sy, zoom, o)

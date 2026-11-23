@@ -72,28 +72,31 @@ func (r *Renderer) FigureDrawable(cam render.Camera, sc Scene, f Figure) Drawabl
 
 func (r *Renderer) uprightDraw(sc Scene, f Figure, names []string, sx, sy, zoom float64, tint [3]float32, air gfx.Air) func(*ebiten.Image) {
 	strained := f.Mood == MoodStrained
+	load, pose, coin, mark := f.Load, f.Pose, f.Pose.Carry && f.role != ScribeRole, f.mark
+	now, reduce, seed := sc.Time, sc.Reduce, f.seedOf()
 	return func(dst *ebiten.Image) {
 		drawn, ok := r.Lib.DrawFirstAir(dst, names, sx, sy, zoom, render.SpriteOptions{Tint: tint}, air)
 		if !ok {
 			fallbackFigure(dst, sx, sy, zoom, 10, look{tint: tint})
 		}
 		switch {
-		case f.Load != nil:
-			r.drawLoad(dst, f.Load, f.Pose, sx, sy, zoom)
-		case f.Pose.Carry && f.role != ScribeRole:
-			r.Lib.Draw(dst, gfx.EffectName("coin", int(sc.Time*8)), sx, sy-r.headLift(drawn, zoom), zoom, render.SpriteOptions{})
+		case load != nil:
+			r.drawLoad(dst, load, pose, sx, sy, zoom)
+		case coin:
+			r.Lib.Draw(dst, gfx.EffectName("coin", int(now*8)), sx, sy-r.headLift(drawn, zoom), zoom, render.SpriteOptions{})
 		}
-		if strained && f.mark && zoom >= sweatZoom {
-			r.drawSweat(dst, sx, sy, zoom, sc.Time+seedOffset(f.seedOf()), sc.Reduce)
+		if strained && mark && zoom >= sweatZoom {
+			r.drawSweat(dst, sx, sy, zoom, now+seedOffset(seed), reduce)
 		}
 	}
 }
 
 func (r *Renderer) restingDraw(sc Scene, f Figure, names []string, sx, sy, zoom float64, air gfx.Air) func(*ebiten.Image) {
 	local := sc.Time + seedOffset(f.seedOf())
+	dir, snore := f.Pose.Dir, f.mark && zoom >= snoreZoom && !sc.Reduce
 	return func(dst *ebiten.Image) {
-		r.drawSeated(dst, names, sx, sy, zoom, logSeat, f.Pose.Dir, look{air: air})
-		if f.mark && zoom >= snoreZoom && !sc.Reduce {
+		r.drawSeated(dst, names, sx, sy, zoom, logSeat, dir, look{air: air})
+		if snore {
 			r.drawSnore(dst, sx, sy, zoom, local)
 		}
 	}
@@ -109,13 +112,14 @@ func (r *Renderer) sickDraw(sc Scene, f Figure, names []string, sx, sy, zoom flo
 	if sc.Reduce {
 		t = 0
 	}
+	role, mark, dir := f.role, f.mark, f.Pose.Dir
 	return func(dst *ebiten.Image) {
 		if oom {
-			r.drawFaint(dst, f.role, names, sx, sy, zoom, t, f.mark, air)
+			r.drawFaint(dst, role, names, sx, sy, zoom, t, mark, air)
 			return
 		}
-		r.drawSeated(dst, names, sx+shiver, sy, zoom, groundSeat, f.Pose.Dir, look{tint: sickTint, air: air})
-		if f.mark {
+		r.drawSeated(dst, names, sx+shiver, sy, zoom, groundSeat, dir, look{tint: sickTint, air: air})
+		if mark {
 			r.drawDizzy(dst, sx, sy+2*zoom, zoom, t)
 		}
 	}

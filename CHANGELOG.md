@@ -2,6 +2,18 @@
 
 Every version of Kubernites, newest first. A release goes out only when the version and this file both moved (`scripts/check-release.sh`).
 
+## 0.15.1 (2026-11-22)
+
+- In LIVE CLUSTER the top bar shows the cluster's CPU, memory and Pods requested of allocatable, counted as the scheduler counts requests, with the campaign's food and housing in story mode. A number the cluster does not give is left out.
+- A node's card in LIVE CLUSTER shows its CPU, memory and Pods as bars, requested of allocatable, with metrics-server's usage when it answers, its instance type and zone, and what the control plane's own Pods request on a control-plane node. It showed no bar before.
+- The Dashboard opens in LIVE CLUSTER (C, or DASHBOARD beside EVENTS and KUBE): the nodes as the scheduler sees them, Pending Pods with the scheduler's reason, workloads below their desired replicas, Services with no ready endpoint, the busiest Pods and each node's ephemeral storage, under four gauges that count Ready nodes, Ready Pods, workloads at their replicas and Services with a ready endpoint. It only reads.
+- LIVE CLUSTER draws a big cluster faster: a frame of 30 nodes and 580 Pods takes about a third less CPU at the closest zoom and a quarter less zoomed out, and makes less than half the garbage, because buildings off the screen are no longer drawn and the town's layout is no longer worked out again on every frame. Nothing on the screen looks or answers differently.
+- The campaign's Keep card shows its housing bar beside its food bar, and its size line fits on one row with Kubernetes names.
+- In the Handbook, a page's card keeps the pointer while it is over the card, so LEARN, ON A CREW and ALMANAC can be clicked wherever the card is drawn, also to the left of its plate and over other plates. The card no longer jumps to the page of a plate beneath it, a card opened by pointing at a plate stays open on the way to its buttons, and a card is never drawn over its own plate.
+- The gold frame the guide puts on a Handbook plate is no longer drawn over an open card: it stops at the card's edge, and at the edge of the map for a plate scrolled half out of sight.
+- When the realm pauses itself, the tips of the top bar's buttons keep off the PAUSED box.
+- The notices at the top right stay in sight while the short Speaking Stone is open, as the step's boxes do, so a notice being read no longer vanishes while a command is typed.
+
 ## 0.15.0 (2026-11-22)
 
 - The first release of this repository.

@@ -147,13 +147,40 @@ func FrontOf(s view.Structure, huts *Vec) (Vec, Vec) {
 }
 
 func ownedBy(c model.CrewChain, p model.PodView) bool {
-	rs := OwnerRS(p)
+	name, ok := strings.CutPrefix(p.Owner, ownerPrefix)
+	if !ok {
+		return false
+	}
 	for _, f := range c.Foremen {
-		if f.ID() == rs {
+		if sameJoined(f.Namespace, f.Name, p.Namespace, name) {
 			return true
 		}
 	}
 	return false
+}
+
+func sameJoined(a, b, c, d string) bool {
+	if a == c {
+		return b == d
+	}
+	if len(a)+len(b) != len(c)+len(d) {
+		return false
+	}
+	at := func(x, y string, i int) byte {
+		switch {
+		case i < len(x):
+			return x[i]
+		case i == len(x):
+			return '/'
+		}
+		return y[i-len(x)-1]
+	}
+	for i := range len(a) + 1 + len(b) {
+		if at(a, b, i) != at(c, d, i) {
+			return false
+		}
+	}
+	return true
 }
 
 type Birth func(pod string) (float64, Vec, bool)

@@ -159,6 +159,14 @@ func (h *HUD) paintAll(dst *ebiten.Image, f Frame) {
 
 func (h *HUD) Drawn() []Surface { return append([]Surface(nil), h.drawn...) }
 
+func (h *HUD) paintSurfaces(dst *ebiten.Image, list []paintedSurface) {
+	for _, s := range list {
+		if s.Rect.W > 0 && s.Rect.H > 0 {
+			s.paint(clipTo(dst, s.Rect))
+		}
+	}
+}
+
 func one(s Surface) []paintedSurface { return []paintedSurface{{Surface: s}} }
 
 func vignetteSurfaces(h *HUD, _ Frame) []paintedSurface {
@@ -450,11 +458,11 @@ func introSurfaces(h *HUD, f Frame) []paintedSurface {
 	if h.IntroHidden(f) {
 		out = append(out, paintedSurface{Surface: Surface{Slot: SlotPointer, Kind: "arrow", Key: "arrow:" + in.ID, Owner: key, Rect: h.edgeArrowRect(target, f), Ring: true}, paint: func(d *ebiten.Image) { h.drawEdgeArrow(d, target, f) }})
 	} else {
-		out = append(out, paintedSurface{Surface: ringSurface(key, target), paint: func(d *ebiten.Image) { h.strokeHole(d, target) }})
+		out = append(out, h.onMap(f, target, paintedSurface{Surface: ringSurface(key, target), paint: func(d *ebiten.Image) { h.strokeHole(d, target) }}))
 	}
 	if h.lineClear(f, card, target) {
 		if line, lineOK := h.pointerPath(f, card, target); lineOK {
-			out = append(out, paintedSurface{Surface: lineSurface(key, line), paint: func(d *ebiten.Image) { drawPointer(d, line) }})
+			out = append(out, h.onMap(f, target, paintedSurface{Surface: lineSurface(key, line), paint: func(d *ebiten.Image) { drawPointer(d, line) }}))
 		}
 	}
 	return out
@@ -541,7 +549,8 @@ func hintSurfaces(h *HUD, f Frame) []paintedSurface {
 	}
 	for _, b := range h.Buttons(f) {
 		if b.ID == id {
-			return one(beaconSurface("hint:"+id, b.Rect))
+			rect := b.Rect
+			return []paintedSurface{h.onMap(f, rect, paintedSurface{Surface: beaconSurface("hint:"+id, rect), paint: func(d *ebiten.Image) { h.drawBeacon(d, rect) }})}
 		}
 	}
 	return nil
@@ -552,7 +561,7 @@ func teacherBeaconSurfaces(h *HUD, f Frame) []paintedSurface {
 	if !ok {
 		return nil
 	}
-	return one(beaconSurface("teacher:"+b.ID, b.Rect))
+	return []paintedSurface{h.onMap(f, b.Rect, paintedSurface{Surface: beaconSurface("teacher:"+b.ID, b.Rect), paint: func(d *ebiten.Image) { h.drawBeacon(d, b.Rect) }})}
 }
 
 func guideSurfaces(h *HUD, f Frame) []paintedSurface {
@@ -567,20 +576,20 @@ func guideSurfaces(h *HUD, f Frame) []paintedSurface {
 		if h.holeStroked(f) {
 			s := ringSurface(key, target)
 			s.Key = "guide-ring:" + key
-			out = append(out, paintedSurface{Surface: s, paint: func(d *ebiten.Image) { h.strokeHole(d, target) }})
+			out = append(out, h.onMap(f, target, paintedSurface{Surface: s, paint: func(d *ebiten.Image) { h.strokeHole(d, target) }}))
 		}
 		if h.lineClear(f, card, target) {
 			if line, lineOK := h.pointerPath(f, card, target); lineOK {
 				s := lineSurface(key, line)
 				s.Key = "guide-pointer:" + key
-				out = append(out, paintedSurface{Surface: s, paint: func(d *ebiten.Image) { drawPointer(d, line) }})
+				out = append(out, h.onMap(f, target, paintedSurface{Surface: s, paint: func(d *ebiten.Image) { drawPointer(d, line) }}))
 			}
 		}
 		return out
 	}
 	for _, r := range h.guideBeacons(f) {
 		rect := r
-		out = append(out, paintedSurface{Surface: beaconSurface("guide", rect), paint: func(d *ebiten.Image) { h.drawBeacon(d, rect) }})
+		out = append(out, h.onMap(f, rect, paintedSurface{Surface: beaconSurface("guide", rect), paint: func(d *ebiten.Image) { h.drawBeacon(d, rect) }}))
 	}
 	return out
 }

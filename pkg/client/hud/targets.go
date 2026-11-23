@@ -65,18 +65,7 @@ func (h *HUD) Hides(r ui.Rect, f Frame) bool {
 }
 
 func (h *HUD) drawTargetsOnTop(dst *ebiten.Image, f Frame) {
-	if h.IntroShown(f) {
-		if target, ok := h.IntroHole(f); ok {
-			if h.holeStroked(f) {
-				h.strokeHole(dst, target)
-			}
-			h.drawClearPointer(dst, f, h.IntroCard(f), target)
-		}
-		return
-	}
-	for _, r := range h.guideBeacons(f) {
-		h.drawBeacon(dst, r)
-	}
+	h.paintSurfaces(dst, guideSurfaces(h, f))
 }
 
 func (h *HUD) guideBeacons(f Frame) []ui.Rect {

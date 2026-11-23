@@ -27,8 +27,7 @@ func ComponentStructure(pod model.PodView) string {
 
 func (r *Renderer) collect(cam render.Camera, sc Scene) []Drawable {
 	r.agesOf().track(sc.Age, sc.Time)
-	items := []Drawable{}
-	items = append(items, r.sceneryItems(cam, sc)...)
+	items := append(r.items[:0], r.sceneryItems(cam, sc)...)
 	items = append(items, r.wildItems(cam, sc)...)
 	items = append(items, r.charterItems(cam, sc)...)
 	items = append(items, r.structureItems(cam, sc)...)
@@ -93,8 +92,8 @@ func (r *Renderer) structureItems(cam render.Camera, sc Scene) []Drawable {
 	items := r.placeStructures(cam, sc)
 	fade := Occluders(items, sc.Selected, r.hides(zoom))
 	out := []Drawable{}
-	for _, it := range items {
-		it := it
+	hits := r.structureHits(len(items))
+	for i, it := range items {
 		alpha := float32(1)
 		if it.S.State == view.StateConstruction {
 			alpha = .55 + .45*float32(it.S.Progress)
@@ -102,26 +101,16 @@ func (r *Renderer) structureItems(cam render.Camera, sc Scene) []Drawable {
 		if fade[it.S.ID] {
 			alpha = min(alpha, .45)
 		}
-		hit := &Hit{Kind: HitStructure, ID: it.S.ID, Structure: it.S, Rect: it.Rect, Shapes: ShapeAt(r.ShownName(it.names), it.sx, it.sy, zoom)}
+		hits[i] = Hit{Kind: HitStructure, ID: it.S.ID, Structure: it.S, Rect: it.Rect, Shapes: ShapeAt(r.ShownName(it.names), it.sx, it.sy, zoom)}
+		hit := &hits[i]
 		lo, hi := Footprint(it.S)
-		selected := it.S.ID == sc.Selected
-		ivy := r.ivyFor(it.S)
-		opts := render.SpriteOptions{Alpha: alpha}
-		if tint, ok := sc.heraldTint(it.S.Object.Namespace); ok && it.S.Kind != view.StructKeep {
-			opts.Tint = tint
+		d := Drawable{Depth: it.Depth, Hit: hit, box: footprint{on: true, lo: lo, hi: hi, rect: it.Rect}}
+		if r.reaches(r.structureReach(cam, sc.Site, it)) {
+			d.Draw = r.structureDraw(cam, sc, it, alpha)
+		} else {
+			d.Draw = r.structureWarm(sc, it)
 		}
-		out = append(out, Drawable{Depth: it.Depth, Hit: hit, box: footprint{on: true, lo: lo, hi: hi, rect: it.Rect}, Draw: func(dst *ebiten.Image) {
-			if selected {
-				r.outlineSprite(dst, it.names, it.sx, it.sy, zoom)
-			}
-			name, ok := r.Lib.DrawFirst(dst, it.names, it.sx, it.sy, zoom, opts)
-			if !ok {
-				fallbackBlock(dst, cam, sc.Site, it.S)
-				return
-			}
-			r.drawIvy(dst, name, ivy, it.sx, it.sy, zoom, alpha)
-			r.drawFlags(dst, name, it.S, it.sx, it.sy, zoom, sc.Time, alpha)
-		}})
+		out = append(out, d)
 		if it.S.State == view.StateConstruction {
 			out = append(out, r.builderItems(cam, sc, it.S)...)
 		}
@@ -130,6 +119,19 @@ func (r *Renderer) structureItems(cam render.Camera, sc Scene) []Drawable {
 		}
 	}
 	return out
+}
+
+func (r *Renderer) structureHits(n int) []Hit {
+	if !r.clipping {
+		return make([]Hit, n)
+	}
+	stale := len(r.builtHit)
+	if cap(r.builtHit) < n {
+		r.builtHit = make([]Hit, n)
+	}
+	r.builtHit = r.builtHit[:n]
+	clearTail(r.builtHit, stale)
+	return r.builtHit
 }
 
 func (r *Renderer) builderItems(cam render.Camera, sc Scene, s view.Structure) []Drawable {

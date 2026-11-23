@@ -51,14 +51,16 @@ func railSlot(i int) ui.Rect {
 }
 
 func (h *HUD) railShown(f Frame) bool {
-	return h.OverlayID == OverlayNone && (f.Shown(SurfaceRail) || slices.ContainsFunc(f.Notices, timelyNotice)) && !f.railQuiet()
+	return h.railRoom() && (f.Shown(SurfaceRail) || slices.ContainsFunc(f.Notices, timelyNotice)) && !f.railQuiet()
 }
 
 func timelyNotice(n Notice) bool { return n.Timely }
 
+func (h *HUD) railRoom() bool { return h.OverlayID == OverlayNone || h.ShortStone() }
+
 func (h *HUD) noticeSeen(f Frame, id string) bool {
 	n, ok := findNotice(f.Notices, id)
-	if !ok || h.OverlayID != OverlayNone || !n.Timely && !f.Shown(SurfaceRail) {
+	if !ok || !h.railRoom() || !n.Timely && !f.Shown(SurfaceRail) {
 		return false
 	}
 	in := f.Guide.Intro

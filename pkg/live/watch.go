@@ -347,6 +347,7 @@ func (r *Realm) readMetrics(ctx context.Context) {
 		}
 		r.mu.Lock()
 		r.usage = u
+		r.measure()
 		r.mu.Unlock()
 	}
 }

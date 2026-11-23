@@ -107,7 +107,7 @@ func shownStats(stats []Stat, f Frame) []Stat {
 
 func (h *HUD) rawTopStats(f Frame) []Stat {
 	if h.live != nil {
-		out := h.liveStats()
+		out := h.liveStats(f)
 		h.layoutStats(out)
 		return out
 	}

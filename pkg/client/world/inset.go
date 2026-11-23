@@ -56,8 +56,13 @@ func (r *Renderer) DrawInset(dst *ebiten.Image, sc Scene) bool {
 	r.drawLivingGround(dst, cam, sc)
 	r.drawDecks(dst, cam, sc)
 	r.drawRollRoads(dst, cam, sc)
-	for _, it := range r.sceneItems(cam, sc) {
-		it.Draw(dst)
+	restore := r.clipTo(b)
+	items := r.sceneItems(cam, sc)
+	restore()
+	for _, it := range items {
+		if it.Draw != nil {
+			it.Draw(dst)
+		}
 	}
 	drawNight(dst, sc.DayPhase)
 	r.drawLifeGlow(dst, cam, sc)

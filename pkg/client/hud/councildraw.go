@@ -21,6 +21,9 @@ func CounselBox() ui.Rect {
 }
 
 func Counsel(f Frame) string {
+	if f.Live {
+		return LiveCounsel(f)
+	}
 	switch {
 	case f.Caesar.Counsel != "":
 		return f.Caesar.Counsel
@@ -52,9 +55,10 @@ func (h *HUD) drawCouncil(dst *ebiten.Image, f Frame) {
 		h.Font.Draw(dst, row, box.X, box.Y+2+i*ui.LineHeight, 1, ui.Palette.Cream)
 	}
 	h.drawDials(dst, f)
-	active := h.CouncilTab()
-	for i, a := range Advisors {
-		h.drawCouncilTab(dst, CouncilTabID(i), a, active == a.Id)
+	active := h.councilTabOf(f)
+	advisors := councilAdvisors(f)
+	for i, a := range advisors {
+		h.drawCouncilTab(dst, councilTabAt(i, len(advisors)), a, active == a.Id)
 	}
 	body := CouncilBody()
 	ui.Fill(dst, body, consoleInk)
@@ -122,17 +126,18 @@ func (h *HUD) drawCells(dst *ebiten.Image, cols []int, cells []Cell, x, y int) {
 func (h *HUD) councilPlainButtons(f Frame) []Button {
 	out := []Button{}
 	for _, b := range h.CouncilButtons(f) {
-		if b.Label != "" && b.Rect != councilTabRect(b.ID) {
+		if b.Label != "" && b.Rect != councilTabRect(b.ID, f) {
 			out = append(out, b)
 		}
 	}
 	return out
 }
 
-func councilTabRect(id string) ui.Rect {
-	for i, a := range Advisors {
+func councilTabRect(id string, f Frame) ui.Rect {
+	advisors := councilAdvisors(f)
+	for i, a := range advisors {
 		if id == CouncilPrefix+":tab:"+a.Id {
-			return CouncilTabID(i)
+			return councilTabAt(i, len(advisors))
 		}
 	}
 	return ui.Rect{W: -1}

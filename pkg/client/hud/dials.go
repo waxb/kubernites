@@ -32,6 +32,9 @@ type Dial struct {
 }
 
 func RatingDials(f Frame) []Dial {
+	if f.Live {
+		return LiveDials(f)
+	}
 	r, known := f.Caesar.Ratings, f.Caesar.Rated
 	return withRatingEffects(f, []Dial{
 		{Label: "RELIABILITY", Icon: "icon/rating-reliability", Value: r.Reliability, Known: known, Text: Nines(f.State.SLO.Current), Tip: "Reliability: the share of boxes delivered fresh, the Nines (the dial's arc grades it)"},

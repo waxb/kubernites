@@ -45,6 +45,8 @@ type Realm struct {
 	clk        *clock.Clock
 	logs       podLogReader
 	usage      Usage
+	measured   view.MetricsSnapshot
+	council    view.LiveCouncil
 	watches    []func(store.Event)
 	wire       *wire
 	watching   bool
@@ -90,6 +92,7 @@ func OpenContext(ctx context.Context, s Snapshot, logs podLogReader, usage Usage
 	r := &Realm{sinceDrawn: PumpEvery, snap: s.clone(), world: world, mirror: mirror, clk: clock.New(s.TakenAt), logs: logs, usage: usage, health: map[string]kindHealth{}}
 	mirror.Watch(func(e store.Event) { r.outbox = append(r.outbox, e) })
 	r.book = newTroubleBook(signals(&r.snap))
+	r.measure()
 	return r, nil
 }
 
@@ -229,6 +232,7 @@ func (r *Realm) Pump(realSeconds float64) {
 	if r.dirty && r.sinceDrawn >= PumpEvery {
 		r.dirty, r.sinceDrawn = false, 0
 		r.redraw()
+		r.measure()
 		r.book.reckon(signals(&r.snap), r.clk.Seconds(), &r.snap, r.clk.Now())
 	} else {
 		r.book.age(r.clk.Seconds())
@@ -276,18 +280,7 @@ func (r *Realm) Site() view.Site {
 func (r *Realm) Metrics() view.MetricsSnapshot {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	out := view.MetricsSnapshot{Pods: map[string]view.PodMetrics{}, Nodes: map[string]view.NodeMetrics{}, Augury: r.usage.Available}
-	for key, u := range r.usage.Pods {
-		out.Pods[key] = view.PodMetrics{CPUMilli: u.CPUMilli, MemoryBytes: u.MemBytes}
-	}
-	for _, n := range store.View[*corev1.Node](r.mirror, store.KindNode, "") {
-		nm := view.NodeMetrics{CPUAllocatableMilli: n.Status.Allocatable.Cpu().MilliValue(), MemoryAllocatableBytes: n.Status.Allocatable.Memory().Value()}
-		if u, ok := r.usage.Nodes[n.Name]; ok {
-			nm.CPUMilli, nm.MemoryBytes = u.CPUMilli, u.MemBytes
-		}
-		out.Nodes[n.Name] = nm
-	}
-	return out
+	return r.measured
 }
 
 func (r *Realm) Action(view.Action) (string, error) {
@@ -459,7 +452,7 @@ func (r *Realm) GameState() view.GameState {
 	return st
 }
 
-var liveReveals = []string{"stone", "tidings", "heraldry"}
+var liveReveals = []string{"stone", "tidings", "heraldry", "council"}
 
 type stone struct {
 	r *Realm
@@ -574,4 +567,10 @@ func (r *Realm) Job(namespace, name string) (*batchv1.Job, bool) {
 		}
 	}
 	return nil, false
+}
+
+func (r *Realm) Council() view.LiveCouncil {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.council
 }

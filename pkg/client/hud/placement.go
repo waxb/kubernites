@@ -24,6 +24,28 @@ func overlapArea(a, b ui.Rect) int {
 	return w * h
 }
 
+func within(inner, outer ui.Rect) bool {
+	return inner.X >= outer.X && inner.Y >= outer.Y && inner.X+inner.W <= outer.X+outer.W && inner.Y+inner.H <= outer.Y+outer.H
+}
+
+func beside(r, cut ui.Rect) ui.Rect {
+	if overlapArea(r, cut) == 0 {
+		return r
+	}
+	best := ui.Rect{}
+	for _, c := range []ui.Rect{
+		{X: r.X, Y: r.Y, W: cut.X - r.X, H: r.H},
+		{X: cut.X + cut.W, Y: r.Y, W: r.X + r.W - cut.X - cut.W, H: r.H},
+		{X: r.X, Y: r.Y, W: r.W, H: cut.Y - r.Y},
+		{X: r.X, Y: cut.Y + cut.H, W: r.W, H: r.Y + r.H - cut.Y - cut.H},
+	} {
+		if c.W > 0 && c.H > 0 && c.W*c.H > best.W*best.H {
+			best = c
+		}
+	}
+	return best
+}
+
 func blockedArea(r ui.Rect, blocked []ui.Rect) int {
 	total := 0
 	for _, b := range blocked {

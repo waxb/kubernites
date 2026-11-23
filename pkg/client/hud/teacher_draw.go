@@ -141,9 +141,7 @@ func raising(goal string, f Frame) bool {
 }
 
 func (h *HUD) drawTeacherBeacons(dst *ebiten.Image, f Frame) {
-	if b, ok := h.teacherLit(f); ok {
-		h.drawBeacon(dst, b.Rect)
-	}
+	h.paintSurfaces(dst, teacherBeaconSurfaces(h, f))
 }
 
 func (h *HUD) Lit(f Frame) string {

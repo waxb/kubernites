@@ -1,6 +1,7 @@
 package world
 
 import (
+	"image"
 	"math"
 
 	"github.com/hajimehoshi/ebiten/v2"
@@ -186,6 +187,12 @@ type Renderer struct {
 	living   *living
 	focus    FocusMark
 	inset    bool
+	clip     image.Rectangle
+	clipping bool
+	items    []Drawable
+	hitBuf   []Hit
+	builtHit []Hit
+	depth    depthSort
 }
 
 func NewRenderer(lib *gfx.Library) *Renderer {
@@ -207,15 +214,23 @@ func (r *Renderer) Draw(dst *ebiten.Image, cam render.Camera, sc Scene) {
 	r.drawSelectionGround(dst, cam, sc)
 	r.drawLifeGround(dst, cam, sc)
 	r.drawRollRoads(dst, cam, sc)
+	restore := r.clipTo(screen)
 	items := r.sceneItems(cam, sc)
-	hits := make([]Hit, 0, len(items))
+	restore()
+	stale := len(r.hitBuf)
+	r.hitBuf = r.hitBuf[:0]
 	for _, it := range items {
-		it.Draw(dst)
+		if it.Draw != nil {
+			it.Draw(dst)
+		}
 		if it.Hit != nil {
-			hits = append(hits, *it.Hit)
+			r.hitBuf = append(r.hitBuf, *it.Hit)
 		}
 	}
-	r.HitList = append(append([]Hit(nil), r.deckHits...), hits...)
+	clearTail(r.hitBuf, stale)
+	stale = len(r.HitList)
+	r.HitList = append(append(r.HitList[:0], r.deckHits...), r.hitBuf...)
+	clearTail(r.HitList, stale)
 	r.drawForemanThreads(dst, cam, sc)
 	r.drawLifeOverlay(dst, cam, sc)
 	r.DrawOmenXray(dst, cam, sc)
@@ -228,15 +243,24 @@ func (r *Renderer) Draw(dst *ebiten.Image, cam render.Camera, sc Scene) {
 }
 
 func (r *Renderer) sceneItems(cam render.Camera, sc Scene) []Drawable {
+	stale := len(r.items)
 	items := r.stoneItems(r.collect(cam, sc), cam, sc)
 	items = append(items, r.lifeItems(cam, sc)...)
 	items = append(items, r.livingItems(cam, sc)...)
 	items = append(items, r.BorderItems(cam, sc)...)
 	items = append(items, r.forumItems(cam, sc)...)
 	items = append(items, r.foremanItems(cam, sc)...)
-	liftWalkers(items, cam.Scale())
-	sortByDepth(items)
+	r.depth.lift(items, cam.Scale())
+	r.depth.sort(items)
+	clearTail(items, stale)
+	r.items = items
 	return items
+}
+
+func clearTail[T any](s []T, stale int) {
+	if stale > len(s) && stale <= cap(s) {
+		clear(s[len(s):stale])
+	}
 }
 
 func (r *Renderer) Home(pod string) (Vec, bool) {

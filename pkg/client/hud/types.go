@@ -160,6 +160,8 @@ type Frame struct {
 	Panels        map[string]PanelPin
 	BoardCompact  bool
 	BoardForced   bool
+	Live          bool
+	LiveCouncil   view.LiveCouncil
 	raw           *rawParts
 	liveBoard     *steadyBoard
 }

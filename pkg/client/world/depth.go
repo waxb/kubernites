@@ -41,17 +41,29 @@ type liftBlock struct {
 }
 
 func liftBlocks(items []Drawable) []liftBlock {
-	blocks := []liftBlock{}
+	return new(depthSort).blocksOf(items)
+}
+
+func (s *depthSort) blocksOf(items []Drawable) []liftBlock {
+	s.blocks = s.blocks[:0]
 	for _, it := range items {
 		if it.box.on {
-			blocks = append(blocks, liftBlock{depth: it.Depth, lo: it.box.lo, hi: it.box.hi, rect: it.box.rect})
+			s.blocks = append(s.blocks, liftBlock{depth: it.Depth, lo: it.box.lo, hi: it.box.hi, rect: it.box.rect})
 		}
 	}
-	return depthOrder(blocks, func(b liftBlock) float64 { return b.depth })
+	s.lifted = s.lifted[:0]
+	for _, k := range s.orderBy(len(s.blocks), func(i int) float64 { return s.blocks[i].depth }) {
+		s.lifted = append(s.lifted, s.blocks[k])
+	}
+	return s.lifted
 }
 
 func liftWalkers(items []Drawable, zoom float64) {
-	blocks := liftBlocks(items)
+	new(depthSort).lift(items, zoom)
+}
+
+func (s *depthSort) lift(items []Drawable, zoom float64) {
+	blocks := s.blocksOf(items)
 	for i := range items {
 		w := &items[i]
 		if !w.stand.on {

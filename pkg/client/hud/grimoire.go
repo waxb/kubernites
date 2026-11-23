@@ -138,10 +138,10 @@ func (h *HUD) stepKnowledge(in Input, f Frame) {
 	l := h.Knowledge(f)
 	dt := f.Clock - h.Kmap.clock
 	h.Kmap.clock = f.Clock
-	hit, ok := HitButton(h.GrimoireButtons(f), in.MX, in.MY)
-	hit = h.throughCard(l, hit, ok, in)
+	buttons := h.GrimoireButtons(f)
+	hit, ok := HitButton(buttons, in.MX, in.MY)
 	if !h.holdsOpenedPage(in) {
-		h.trackFocus(hit, ok)
+		h.trackFocus(h.cardReach(l, buttons), hit, ok, in)
 	}
 	if in.Click {
 		h.grabMap(in, hit, ok)
@@ -153,16 +153,18 @@ func (h *HUD) stepKnowledge(in Input, f Frame) {
 	}
 }
 
-func (h *HUD) throughCard(l KMapLayout, hit Button, ok bool, in Input) Button {
-	if !ok || hit.ID != KmapCardID {
-		return hit
+type cardReach struct {
+	card, bridge ui.Rect
+	open         bool
+}
+
+func (h *HUD) cardReach(l KMapLayout, buttons []Button) cardReach {
+	card, ok := HitID(buttons, KmapCardID)
+	if !ok {
+		return cardReach{}
 	}
-	for _, p := range l.Plaques {
-		if r, seen := clipRect(h.ScreenOf(p.Rect()), KnowledgeView); seen && r.Contains(in.MX, in.MY) && p.Page.ID != h.focusedPage(l) {
-			return Button{ID: "grim:" + p.Page.ID, Rect: r}
-		}
-	}
-	return hit
+	plate, _ := HitID(buttons, "grim:"+h.focusedPage(l))
+	return cardReach{card: card.Rect, bridge: spanOf(plate.Rect, card.Rect), open: true}
 }
 
 func (h *HUD) holdsOpenedPage(in Input) bool {
@@ -195,11 +197,12 @@ func (h *HUD) focusedPage(l KMapLayout) string {
 	return ""
 }
 
-func (h *HUD) trackFocus(hit Button, ok bool) {
+func (h *HUD) trackFocus(reach cardReach, hit Button, ok bool, in Input) {
 	switch {
+	case reach.open && reach.card.Contains(in.MX, in.MY):
 	case ok && strings.HasPrefix(hit.ID, "grim:"):
 		h.Kmap.Focus = strings.TrimPrefix(hit.ID, "grim:")
-	case ok && (hit.ID == KmapCardID || strings.HasPrefix(hit.ID, "learn:")):
+	case !ok && reach.open && reach.bridge.Contains(in.MX, in.MY):
 	default:
 		h.Kmap.Focus = ""
 	}

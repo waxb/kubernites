@@ -158,16 +158,7 @@ func (h *HUD) HintedAction(f Frame) string {
 }
 
 func (h *HUD) drawHint(dst *ebiten.Image, f Frame) {
-	id := h.HintedButton(f)
-	if id == "" {
-		return
-	}
-	for _, b := range h.Buttons(f) {
-		if b.ID == id {
-			h.drawBeacon(dst, b.Rect)
-			return
-		}
-	}
+	h.paintSurfaces(dst, hintSurfaces(h, f))
 }
 
 func fadedShortFix(st view.GameState, rem view.RemedyView) string {

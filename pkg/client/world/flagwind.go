@@ -1,7 +1,6 @@
 package world
 
 import (
-	"hash/fnv"
 	"math"
 	"strconv"
 
@@ -22,9 +21,14 @@ const (
 )
 
 func flagSeed(s view.Structure, i int) (float64, float64) {
-	h := fnv.New32a()
-	h.Write([]byte(strconv.Itoa(s.X) + "," + strconv.Itoa(s.Y) + "," + strconv.Itoa(i)))
-	v := h.Sum32()
+	var buf [64]byte
+	text := strconv.AppendInt(buf[:0], int64(s.X), 10)
+	text = strconv.AppendInt(append(text, ','), int64(s.Y), 10)
+	text = strconv.AppendInt(append(text, ','), int64(i), 10)
+	v := uint32(2166136261)
+	for _, c := range text {
+		v = (v ^ uint32(c)) * 16777619
+	}
 	phase := float64(v%1000) / 1000
 	pace := 1 - flagPaceSwing + 2*flagPaceSwing*float64((v/1000)%1000)/1000
 	return phase, pace

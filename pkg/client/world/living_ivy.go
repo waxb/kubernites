@@ -53,6 +53,16 @@ func (r *Renderer) drawIvy(dst *ebiten.Image, name string, level int, sx, sy, zo
 	if level <= 0 {
 		return
 	}
+	img := r.ivyImage(name, level)
+	if img == nil {
+		return
+	}
+	_, reg, _ := r.Lib.Lookup(name)
+	b := img.Bounds()
+	render.DrawAt(dst, img, render.Region{W: b.Dx(), H: b.Dy(), AnchorX: reg.AnchorX, AnchorY: reg.AnchorY}, sx, sy, zoom, render.SpriteOptions{Alpha: alpha})
+}
+
+func (r *Renderer) ivyImage(name string, level int) *ebiten.Image {
 	l := r.livingOf()
 	key := ivyKey{name: name, level: level}
 	img, ok := l.ivy[key]
@@ -60,12 +70,12 @@ func (r *Renderer) drawIvy(dst *ebiten.Image, name string, level int, sx, sy, zo
 		img = r.paintIvy(name, level)
 		l.ivy[key] = img
 	}
-	if img == nil {
-		return
-	}
-	_, reg, _ := r.Lib.Lookup(name)
-	b := img.Bounds()
-	render.DrawAt(dst, img, render.Region{W: b.Dx(), H: b.Dy(), AnchorX: reg.AnchorX, AnchorY: reg.AnchorY}, sx, sy, zoom, render.SpriteOptions{Alpha: alpha})
+	return img
+}
+
+func (r *Renderer) ivyPainted(name string, level int) bool {
+	_, ok := r.livingOf().ivy[ivyKey{name: name, level: level}]
+	return ok
 }
 
 func (r *Renderer) paintIvy(name string, level int) *ebiten.Image {

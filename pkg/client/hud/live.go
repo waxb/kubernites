@@ -11,6 +11,7 @@ import (
 	"github.com/waxb/kubernites/pkg/client/model"
 	"github.com/waxb/kubernites/pkg/client/ui"
 	"github.com/waxb/kubernites/pkg/lexicon"
+	"github.com/waxb/kubernites/pkg/view"
 )
 
 var (
@@ -63,6 +64,7 @@ type LiveCard struct {
 	Hints     bool
 	Listed    []ListedRead
 	Forwards  []LiveForward
+	Council   view.LiveCouncil
 }
 
 func (c *LiveCard) badge() string {
@@ -322,10 +324,11 @@ var liveButtons = map[string]bool{
 	"well:stone": true, GridHome: true, liveRefusedID: true, liveIdleID: true, LiveQuietID: true, liveStaleID: true, liveDrainID: true, liveLedgerID: true,
 	CalamityNext: true, CalamityShow: true, calamityShelve: true, CalamityOK: true, "cmd:chronicles": true,
 	menuHints: true, menuLiveChoices: true, CrewPrefix + ":describe": true, crewYAML: true, StoneMenuID: true,
+	liveCPUID: true, liveMemoryID: true, livePodsID: true, "cmd:council": true,
 }
 
 var livePrefixes = []string{choicesPrefix + ":", volumePrefix, lensPrefix + ":", "tab:", "stone:", "sel:", "det:", "alert:", "blip:", "lesson:", "window:", IntentNotice + ":",
-	calamityPrefix + ":" + calamityBack, "chron:", WoePrefix + ":", EditPrefix, liveForwardPrefix + ":"}
+	calamityPrefix + ":" + calamityBack, "chron:", WoePrefix + ":", EditPrefix, liveForwardPrefix + ":", CouncilPrefix + ":tab:", "info:dial:"}
 
 func LiveReadButton(id string) bool {
 	if liveButtons[id] || strings.HasSuffix(id, ":close") {
@@ -417,14 +420,6 @@ func (h *HUD) liveFiltered(intents []Intent) []Intent {
 		}
 	}
 	return out
-}
-
-func (h *HUD) liveStats() []Stat {
-	name := liveFont.Clip(h.live.Context, 40)
-	return []Stat{
-		{Text: h.live.badge(), slot: h.live.badge(), clr: h.live.badgeColour(), Tip: h.live.levelTip(), Id: liveBadgeID},
-		{Text: name, slot: name, clr: ui.Palette.Text, Tip: h.live.Server, Id: liveBadgeID},
-	}
 }
 
 func (h *HUD) liveClock() string {

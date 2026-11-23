@@ -29,7 +29,7 @@ func KeepSupplyLines(s view.Structure, f Frame) []Line {
 	cpu.lesson = laborLesson
 	cpu.Suffix = ui.Bridge(foodCount(m.CPUMilli)+"/"+foodCount(float64(m.CPUAllocatableMilli)), Amount(m.CPUMilli/1000)+"/"+Amount(float64(m.CPUAllocatableMilli)/1000))
 	mem := supplyBar(ui.Bridge("HOUSING", "MEMORY"), m.MemoryBytes, float64(m.MemoryAllocatableBytes), float64(sys.SystemMemBytes))
-	mem.lesson = loreLesson
+	mem.lesson = laborLesson
 	mem.Suffix = ui.Bridge(housingCount(m.MemoryBytes)+"/"+housingCount(float64(m.MemoryAllocatableBytes)), Amount(m.MemoryBytes/gib)+"/"+Amount(float64(m.MemoryAllocatableBytes)/gib)+" GiB")
 	out := alignLabels([]Line{cpu, mem})
 	if sys.SystemCPUMilli > 0 || sys.SystemMemBytes > 0 {

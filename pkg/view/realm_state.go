@@ -71,16 +71,22 @@ type PodMetrics struct {
 }
 
 type NodeMetrics struct {
-	CPUMilli               float64 `json:"cpuMilli"`
-	MemoryBytes            float64 `json:"memoryBytes"`
-	CPUAllocatableMilli    int64   `json:"cpuAllocatableMilli"`
-	MemoryAllocatableBytes int64   `json:"memoryAllocatableBytes"`
-	CPURequestedMilli      int64   `json:"cpuRequestedMilli"`
-	MemoryRequestedBytes   int64   `json:"memoryRequestedBytes"`
-	Pods                   int     `json:"pods"`
-	EphemeralUsedBytes     int64   `json:"ephemeralUsedBytes"`
-	EphemeralCapacityBytes int64   `json:"ephemeralCapacityBytes"`
-	DiskPressure           bool    `json:"diskPressure"`
+	CPUMilli                  float64 `json:"cpuMilli"`
+	MemoryBytes               float64 `json:"memoryBytes"`
+	CPUAllocatableMilli       int64   `json:"cpuAllocatableMilli"`
+	MemoryAllocatableBytes    int64   `json:"memoryAllocatableBytes"`
+	CPURequestedMilli         int64   `json:"cpuRequestedMilli"`
+	MemoryRequestedBytes      int64   `json:"memoryRequestedBytes"`
+	Pods                      int     `json:"pods"`
+	EphemeralUsedBytes        int64   `json:"ephemeralUsedBytes"`
+	EphemeralCapacityBytes    int64   `json:"ephemeralCapacityBytes"`
+	DiskPressure              bool    `json:"diskPressure"`
+	Measured                  bool    `json:"measured,omitempty"`
+	PodsAllocatable           int     `json:"podsAllocatable,omitempty"`
+	EphemeralRequestedBytes   int64   `json:"ephemeralRequestedBytes,omitempty"`
+	EphemeralAllocatableBytes int64   `json:"ephemeralAllocatableBytes,omitempty"`
+	ControlPlaneCPUMilli      int64   `json:"controlPlaneCpuMilli,omitempty"`
+	ControlPlaneMemoryBytes   int64   `json:"controlPlaneMemoryBytes,omitempty"`
 }
 
 type MetricsSnapshot struct {

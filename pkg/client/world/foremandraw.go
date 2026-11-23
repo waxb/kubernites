@@ -1,6 +1,7 @@
 package world
 
 import (
+	"image"
 	"image/color"
 
 	"github.com/hajimehoshi/ebiten/v2"
@@ -169,9 +170,22 @@ func (f *Foremen) boardOf(id string) (ui.Rect, bool) {
 	return ui.Rect{}, false
 }
 
+const tallyPad = 8
+
+func tallyShows(clip image.Rectangle, m tallyMark) bool {
+	box := m.board
+	if m.Whistle {
+		box = ui.Rect{X: int(m.x), Y: m.top - whistleH, W: whistleW, H: whistleH}
+	}
+	box = box.Inset(-tallyPad)
+	return box.X < clip.Max.X && clip.Min.X < box.X+box.W && box.Y < clip.Max.Y && clip.Min.Y < box.Y+box.H
+}
+
 func (r *Renderer) drawTallies(dst *ebiten.Image) {
+	clip := dst.Bounds()
 	for _, m := range r.ForemenOf().Marks {
 		switch {
+		case !tallyShows(clip, m):
 		case !m.Whistle:
 			drawBoard(dst, m.board, m.text, m.tone, m.ink)
 		default:

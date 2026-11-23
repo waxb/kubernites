@@ -271,7 +271,8 @@ func cardPlace(plaque ui.Rect, height int, others []ui.Rect) ui.Rect {
 		inView(ui.Rect{X: plaque.X + plaque.W/2 - KmapCardW/2, Y: plaque.Y + plaque.H + kmapCardGap, W: KmapCardW, H: height}),
 		inView(ui.Rect{X: plaque.X + plaque.W/2 - KmapCardW/2, Y: plaque.Y - kmapCardGap - height, W: KmapCardW, H: height}),
 	}
-	return FirstClear(candidates, others)
+	own, _ := clipRect(plaque, KnowledgeView)
+	return ClearAvoiding(candidates, []ui.Rect{own}, others)
 }
 
 func (h *HUD) otherPlaques(p KMapPlaque, f Frame) []ui.Rect {
@@ -334,6 +335,32 @@ func GrimoireAlmanac(f Frame, p KMapPlaque) (view.Page, bool) {
 		return view.Page{}, false
 	}
 	return firstMetPage(f, []string{view.SubjectGrimoire}, []string{p.Page.ID})
+}
+
+func (h *HUD) handbookCard(f Frame) (ui.Rect, []Button, bool) {
+	if h.OverlayID != OverlayGrimoire {
+		return ui.Rect{}, nil, false
+	}
+	buttons := h.CardButtons(f, h.Knowledge(f))
+	if len(buttons) == 0 {
+		return ui.Rect{}, nil, false
+	}
+	return buttons[0].Rect, buttons[1:], true
+}
+
+func (h *HUD) onMap(f Frame, target ui.Rect, s paintedSurface) paintedSurface {
+	if h.OverlayID != OverlayGrimoire || !within(target, KnowledgeView) {
+		return s
+	}
+	card, buttons, open := h.handbookCard(f)
+	if open && slices.ContainsFunc(buttons, func(b Button) bool { return b.Rect == target }) {
+		return s
+	}
+	s.Rect, _ = clipRect(s.Rect, KnowledgeView)
+	if open {
+		s.Rect = beside(s.Rect, Shadowed(card))
+	}
+	return s
 }
 
 func (h *HUD) drawCard(dst *ebiten.Image, f Frame, l KMapLayout) {

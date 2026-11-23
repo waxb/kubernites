@@ -51,7 +51,7 @@ func KeepLines(s view.Structure) []Line {
 	if s.Instance == "" && s.CPU == 0 && s.MemoryGiB == 0 {
 		return nil
 	}
-	size := ui.Bridge(foodTag(float64(s.CPU)*view.RationsPerCPU)+" "+housingTag(float64(s.MemoryGiB)*gib), fmt.Sprintf("%d CPU, %d GiB memory", s.CPU, s.MemoryGiB))
+	size := ui.Bridge(foodTag(float64(s.CPU)*view.RationsPerCPU)+" "+housingTag(float64(s.MemoryGiB)*gib), fmt.Sprintf("%d CPU, %dGi", s.CPU, s.MemoryGiB))
 	if s.Instance != "" {
 		size = s.Instance + ": " + size
 	}

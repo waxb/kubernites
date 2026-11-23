@@ -453,23 +453,7 @@ func dimArea(dst *ebiten.Image, area, hole ui.Rect, cut bool, alpha uint8) {
 }
 
 func (h *HUD) drawIntro(dst *ebiten.Image, f Frame) {
-	if !h.IntroShown(f) {
-		return
-	}
-	in := *f.Guide.Intro
-	target, ok := h.IntroHole(f)
-	card := h.IntroCard(f)
-	switch {
-	case ok && h.IntroHidden(f):
-		h.drawEdgeArrow(dst, target, f)
-		h.drawClearPointer(dst, f, card, target)
-	case ok:
-		h.strokeHole(dst, target)
-		h.drawClearPointer(dst, f, card, target)
-	}
-	h.DrawIntroCard(dst, card, in)
-	h.DrawOverlayButtons(dst, h.IntroButtons(f))
-	h.DrawTray(dst, f)
+	h.paintSurfaces(dst, introSurfaces(h, f))
 }
 
 func (h *HUD) strokeHole(dst *ebiten.Image, target ui.Rect) {

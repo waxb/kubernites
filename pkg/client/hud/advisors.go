@@ -113,11 +113,18 @@ func keepRow(s view.Structure, f Frame) []Cell {
 	hands := Supply{Used: float64(m.CPURequestedMilli) / 1000, Total: float64(m.CPUAllocatableMilli) / 1000}
 	lore := Supply{Used: float64(m.MemoryRequestedBytes) / gib, Total: float64(m.MemoryAllocatableBytes) / gib}
 	used := cell(NoValue, ToneDim)
-	if f.Metrics.Augury {
+	if f.Live {
+		used = cell("", ToneDim)
+	}
+	if f.Metrics.Augury && (m.Measured || !f.Live) {
 		used = cell(foodAmount(m.CPUMilli/1000), ratioTone(m.CPUMilli/1000/max(hands.Total, 1e-9)))
 	}
+	pods := fmt.Sprint(m.Pods)
+	if m.PodsAllocatable > 0 {
+		pods = fmt.Sprintf("%d/%d", m.Pods, m.PodsAllocatable)
+	}
 	return []Cell{cell(s.Label, ToneText), cell(foodRatio(hands), ratioTone(hands.Ratio())),
-		used, cell(housingRatio(lore), ratioTone(lore.Ratio())), cell(fmt.Sprint(m.Pods), ToneText)}
+		used, cell(housingRatio(lore), ratioTone(lore.Ratio())), cell(pods, ToneText)}
 }
 
 func foodAmount(cores float64) string {

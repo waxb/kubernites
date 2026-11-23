@@ -40,6 +40,7 @@ func (r *Renderer) hearthDrawable(cam render.Camera, sc Scene, p model.PodView, 
 	if !onScreen(sx, sy, zoom) {
 		return out
 	}
+	pod, now, reduce := p, sc.Time, sc.Reduce
 	name := r.hutName(p)
 	opts := render.SpriteOptions{Alpha: 1}
 	if p.Terminating || p.State == model.HearthBanished {
@@ -59,10 +60,10 @@ func (r *Renderer) hearthDrawable(cam render.Camera, sc Scene, p model.PodView, 
 			vector.FillRect(dst, float32(sx-6*zoom), float32(sy-12*zoom), float32(12*zoom), float32(10*zoom), color.RGBA{170, 110, 70, 255}, false)
 		}
 		if rise >= 1 {
-			age, _ := r.agesOf().phase(p.Name)
-			r.drawWatch(dst, r.watchSprites(p, r.watch, age, sx, sy, zoom, sc.Time, sc.Reduce), zoom, opts)
-			r.drawRequestPiles(dst, p, sx, sy, zoom)
-			r.drawRankMark(dst, name, p.Rank, sx, sy, zoom)
+			age, _ := r.agesOf().phase(pod.Name)
+			r.drawWatch(dst, r.watchSprites(pod, r.watch, age, sx, sy, zoom, now, reduce), zoom, opts)
+			r.drawRequestPiles(dst, pod, sx, sy, zoom)
+			r.drawRankMark(dst, name, pod.Rank, sx, sy, zoom)
 		}
 	}})
 	if d, ok := r.riseDust(cam, sc, anchor, rise); ok {
@@ -187,7 +188,7 @@ func (r *Renderer) walkerDrawable(cam render.Camera, sc Scene, role string, pose
 		shown := r.ShownName(names)
 		hit = &Hit{Kind: HitWalker, ID: pod.Namespace + "/" + pod.Name, Pod: *pod, Rect: SpriteRect(r.Lib, shown, sx, sy, zoom, 12, 20), Shapes: ShapeAt(shown, sx, sy, zoom)}
 	}
-	carry := pose.Carry
+	carry, now := pose.Carry, sc.Time
 	person := role
 	if pod != nil {
 		person = personWorker
@@ -198,7 +199,7 @@ func (r *Renderer) walkerDrawable(cam render.Camera, sc Scene, role string, pose
 			vector.FillRect(dst, float32(sx-2*zoom), float32(sy-10*zoom), float32(4*zoom), float32(10*zoom), color.RGBA{60, 90, 160, 255}, false)
 		}
 		if carry && role != ScribeRole {
-			r.Lib.Draw(dst, gfx.EffectName("coin", int(sc.Time*8)), sx, sy-r.headLift(drawn, zoom), zoom, render.SpriteOptions{})
+			r.Lib.Draw(dst, gfx.EffectName("coin", int(now*8)), sx, sy-r.headLift(drawn, zoom), zoom, render.SpriteOptions{})
 		}
 	}}
 }

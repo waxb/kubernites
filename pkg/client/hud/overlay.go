@@ -427,6 +427,9 @@ func slidPast(spots, blocked []ui.Rect) []ui.Rect {
 
 func (h *HUD) TipBlocked(f Frame) []ui.Rect {
 	out := append([]ui.Rect{TopBar}, inflated(h.panelRects(f), TipClear)...)
+	for _, s := range pinnedSurfaces(h, f) {
+		out = append(out, s.Rect.Inset(-TipClear))
+	}
 	if r, ok := h.ConsoleSpan(f); ok {
 		out = append(out, r)
 	}
