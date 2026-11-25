@@ -106,6 +106,10 @@ jobs:
         run: |
           go build -trimpath -o "kubernites$(go env GOEXE)" ./cmd/kubernites
           ls -l "kubernites$(go env GOEXE)"
+      - name: the macOS build starts
+        if: runner.os == 'macOS'
+        shell: bash
+        run: ./kubernites --version
 
   dco:
     name: dco

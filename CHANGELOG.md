@@ -2,6 +2,12 @@
 
 Every version of Kubernites, newest first. A release goes out only when the version and this file both moved (`scripts/check-release.sh`).
 
+## 0.15.2 (2026-11-25)
+
+- Kubernites no longer quits about a second after it starts on some Macs, as it did on macOS 27.2.1 (issue #1). It moves to Ebitengine 2.10.6, whose window code no longer calls itself without end when something subclasses the window's view while Kubernites runs (hajimehoshi/ebiten#3740). This repository's own build had the same fault.
+- A crash, or an error that ends Kubernites, is also written to `crash.log`, under a line naming the version that ran: beside the save for the game from itch.io (`~/.kubernites/crash.log`), in the settings folder for this repository's build (`~/Library/Application Support/kubernites` on macOS, `~/.config/kubernites` on Linux, `%AppData%\kubernites` on Windows). A window opened from the Finder or the Explorer has no terminal, so before this a crash left nothing to report.
+- The macOS app from itch.io asks for macOS 15 or later, and its program now asks for the same: the 0.15.1 program asked for macOS 26 while the app said 12.
+
 ## 0.15.1 (2026-11-22)
 
 - In LIVE CLUSTER the top bar shows the cluster's CPU, memory and Pods requested of allocatable, counted as the scheduler counts requests, with the campaign's food and housing in story mode. A number the cluster does not give is left out.

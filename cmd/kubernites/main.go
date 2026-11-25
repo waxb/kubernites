@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 
 	"github.com/waxb/kubernites/pkg/client/app"
+	"github.com/waxb/kubernites/pkg/client/crashlog"
 	"github.com/waxb/kubernites/pkg/live"
 )
 
@@ -48,7 +49,8 @@ func run(args []string, env func(string) string, out io.Writer) error {
 		return err
 	}
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo}))
-	return app.Run(nil, windowOptions(o, logger, env))
+	opts := windowOptions(o, logger, env)
+	return crashlog.Watch(opts.SettingsDir, "Kubernites "+app.VersionLabel(), logger, func() error { return app.Run(nil, opts) })
 }
 
 func windowOptions(o options, logger *slog.Logger, env func(string) string) app.Options {

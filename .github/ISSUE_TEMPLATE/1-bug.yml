@@ -47,5 +47,5 @@ body:
     id: output
     attributes:
       label: Output
-      description: What Kubernites printed in the terminal, if anything.
+      description: What Kubernites printed in the terminal, if anything, or the end of crash.log (beside the save, ~/.kubernites/crash.log, for the game from itch.io; in the kubernites settings folder for this repository's build).
       render: text
